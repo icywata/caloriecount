@@ -1,0 +1,792 @@
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Calorie Tracker</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&display=swap" rel="stylesheet" />
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+  :root {
+    --bg: #1c1c1a;
+    --surface: #252523;
+    --surface2: #2e2e2b;
+    --border: rgba(255,255,255,0.1);
+    --border-md: rgba(255,255,255,0.18);
+    --text: #f0f0ec;
+    --text-secondary: #a0a09c;
+    --text-tertiary: #6b6b67;
+    --green: #7dc44a;
+    --green-bg: #1e2e10;
+    --amber: #e8a030;
+    --amber-bg: #2a1f08;
+    --red: #e06060;
+    --red-bg: #2a1010;
+    --blue: #5a9fd4;
+    --radius: 8px;
+    --radius-lg: 12px;
+  }
+
+  body {
+    font-family: 'Inter', system-ui, sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    min-height: 100vh;
+    padding: 2rem 1rem;
+  }
+
+  .container { max-width: 560px; margin: 0 auto; }
+
+  /* ── Auth screens ───────────────────────────────── */
+  #authScreen {
+    min-height: 100vh;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 1rem;
+  }
+
+  .auth-box {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-lg);
+    padding: 2rem;
+    width: 100%;
+    max-width: 360px;
+  }
+
+  .auth-box h2 {
+    font-size: 20px;
+    font-weight: 600;
+    margin-bottom: 0.25rem;
+  }
+
+  .auth-box .auth-sub {
+    font-size: 13px;
+    color: var(--text-secondary);
+    margin-bottom: 1.75rem;
+  }
+
+  .auth-field { margin-bottom: 1rem; }
+  .auth-field label { display: block; font-size: 13px; color: var(--text-secondary); margin-bottom: 6px; }
+  .auth-field input {
+    width: 100%;
+    border: 1px solid var(--border-md);
+    border-radius: var(--radius);
+    padding: 9px 12px;
+    font-size: 14px;
+    font-family: inherit;
+    background: var(--bg);
+    color: var(--text);
+    outline: none;
+  }
+  .auth-field input:focus { border-color: #888; }
+
+  .btn-primary {
+    width: 100%;
+    background: var(--text);
+    color: var(--surface);
+    border: none;
+    border-radius: var(--radius);
+    padding: 10px;
+    font-size: 15px;
+    font-weight: 500;
+    font-family: inherit;
+    cursor: pointer;
+    margin-top: 0.5rem;
+    transition: opacity 0.15s;
+  }
+  .btn-primary:hover { opacity: 0.85; }
+  .btn-primary:disabled { opacity: 0.5; cursor: not-allowed; }
+
+  .auth-switch {
+    text-align: center;
+    margin-top: 1.25rem;
+    font-size: 13px;
+    color: var(--text-secondary);
+  }
+  .auth-switch a { color: var(--blue); cursor: pointer; text-decoration: none; }
+  .auth-switch a:hover { text-decoration: underline; }
+
+  .auth-error {
+    background: var(--red-bg);
+    color: var(--red);
+    border: 1px solid rgba(224,96,96,0.2);
+    border-radius: var(--radius);
+    padding: 8px 12px;
+    font-size: 13px;
+    margin-bottom: 1rem;
+    display: none;
+  }
+
+  /* ── App header ─────────────────────────────────── */
+  .app-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 1.75rem;
+  }
+
+  h1 { font-size: 20px; font-weight: 600; display: flex; align-items: center; gap: 8px; }
+  h1 span { color: var(--text-secondary); font-weight: 400; font-size: 16px; }
+
+  .user-pill {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 13px;
+    color: var(--text-secondary);
+  }
+
+  .btn-logout {
+    background: none;
+    border: 1px solid var(--border-md);
+    border-radius: var(--radius);
+    padding: 4px 10px;
+    font-size: 12px;
+    font-family: inherit;
+    color: var(--text-secondary);
+    cursor: pointer;
+    transition: background 0.15s;
+  }
+  .btn-logout:hover { background: var(--surface2); color: var(--text); }
+
+  /* ── Day nav ────────────────────────────────────── */
+  .day-nav {
+    display: flex; align-items: center; justify-content: space-between;
+    margin-bottom: 1rem;
+    background: var(--surface); border: 1px solid var(--border);
+    border-radius: var(--radius-lg); padding: 10px 14px;
+  }
+  .day-label { font-size: 15px; font-weight: 500; color: var(--text); }
+  .nav-btn {
+    background: none; border: 1px solid var(--border-md);
+    border-radius: var(--radius); padding: 5px 12px; cursor: pointer;
+    font-size: 13px; color: var(--text); font-family: inherit; transition: background 0.15s;
+  }
+  .nav-btn:hover { background: var(--surface2); }
+
+  /* ── Weekly strip ───────────────────────────────── */
+  .week-strip {
+    background: var(--surface); border: 1px solid var(--border);
+    border-radius: var(--radius-lg); padding: 1rem 1.1rem; margin-bottom: 1rem;
+  }
+  .week-strip-label { font-size: 11px; color: var(--text-tertiary); text-transform: uppercase; letter-spacing: 0.06em; margin-bottom: 10px; }
+  .week-days { display: grid; grid-template-columns: repeat(7, 1fr); gap: 5px; }
+  .week-day {
+    display: flex; flex-direction: column; align-items: center;
+    gap: 4px; padding: 8px 4px; border-radius: var(--radius);
+    border: 1px solid transparent; cursor: pointer;
+    transition: background 0.15s, border-color 0.15s; min-width: 0;
+  }
+  .week-day:hover { background: var(--surface2); }
+  .week-day.is-today { border-color: var(--border-md); background: var(--surface2); }
+  .week-day.is-selected { border-color: var(--blue); background: rgba(90,159,212,0.08); }
+  .wd-name { font-size: 10px; color: var(--text-tertiary); text-transform: uppercase; letter-spacing: 0.04em; }
+  .wd-date { font-size: 13px; font-weight: 500; color: var(--text); }
+  .wd-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--surface2); flex-shrink: 0; }
+  .wd-dot.dot-green  { background: var(--green); }
+  .wd-dot.dot-amber  { background: var(--amber); }
+  .wd-dot.dot-red    { background: var(--red); }
+  .wd-dot.dot-future { background: transparent; border: 1px solid var(--text-tertiary); }
+  .wd-cal { font-size: 10px; color: var(--text-tertiary); white-space: nowrap; }
+
+  /* ── Goal / stats section ───────────────────────── */
+  .goal-section {
+    background: var(--surface); border: 1px solid var(--border);
+    border-radius: var(--radius-lg); padding: 1.25rem; margin-bottom: 1rem;
+  }
+  .goal-edit-row { display: flex; align-items: center; gap: 8px; margin-bottom: 1.25rem; }
+  .goal-edit-row label { font-size: 13px; color: var(--text-secondary); white-space: nowrap; }
+  .goal-edit-row input {
+    width: 110px; border: 1px solid var(--border-md); border-radius: var(--radius);
+    padding: 6px 10px; font-size: 14px; font-family: inherit;
+    background: var(--bg); color: var(--text); outline: none;
+  }
+  .goal-edit-row input:focus { border-color: #888; }
+
+  .btn-sm {
+    background: none; border: 1px solid var(--border-md); border-radius: var(--radius);
+    padding: 6px 12px; cursor: pointer; font-size: 13px; font-family: inherit;
+    color: var(--text); transition: background 0.15s;
+  }
+  .btn-sm:hover { background: var(--surface2); }
+
+  .stats-row { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 8px; margin-bottom: 1.1rem; }
+  .stat { background: var(--surface2); border-radius: var(--radius); padding: 12px; text-align: center; }
+  .stat .stat-label { font-size: 11px; color: var(--text-secondary); text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 4px; }
+  .stat .stat-val { font-size: 20px; font-weight: 600; color: var(--text); line-height: 1.2; }
+  .stat .stat-unit { font-size: 11px; color: var(--text-tertiary); margin-top: 2px; }
+
+  .progress-header { display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 8px; }
+  .progress-header span { font-size: 13px; color: var(--text-secondary); }
+  .pct-label { font-size: 13px; font-weight: 600; color: var(--text) !important; }
+  .bar-track { height: 16px; background: var(--surface2); border-radius: 8px; overflow: hidden; border: 1px solid var(--border); }
+  .bar-fill { height: 100%; border-radius: 8px; transition: width 0.35s ease, background 0.35s ease; min-width: 0; }
+  .bar-green { background: var(--green); }
+  .bar-amber { background: var(--amber); }
+  .bar-red   { background: var(--red); }
+  .bar-axis { display: flex; justify-content: space-between; margin-top: 5px; font-size: 11px; color: var(--text-tertiary); }
+
+  /* ── Sections ───────────────────────────────────── */
+  .section {
+    background: var(--surface); border: 1px solid var(--border);
+    border-radius: var(--radius-lg); padding: 1.25rem; margin-bottom: 1rem;
+  }
+  .section-title { font-size: 14px; font-weight: 600; color: var(--text); margin-bottom: 1rem; display: flex; align-items: center; gap: 6px; }
+  .icon { width: 18px; height: 18px; flex-shrink: 0; opacity: 0.7; }
+
+  .add-row { display: flex; gap: 8px; margin-bottom: 1rem; }
+  .add-row input {
+    border: 1px solid var(--border-md); border-radius: var(--radius);
+    padding: 8px 10px; font-size: 14px; font-family: inherit;
+    background: var(--bg); color: var(--text); outline: none;
+  }
+  .add-row input:focus { border-color: #888; }
+  .input-name { flex: 2; min-width: 0; }
+  .input-cal  { flex: 1; min-width: 80px; max-width: 110px; }
+  .btn-add {
+    background: var(--text); color: var(--surface); border: none;
+    border-radius: var(--radius); padding: 8px 14px; font-size: 14px;
+    font-family: inherit; font-weight: 500; cursor: pointer; white-space: nowrap; transition: opacity 0.15s;
+  }
+  .btn-add:hover { opacity: 0.8; }
+  .btn-add:disabled { opacity: 0.5; cursor: not-allowed; }
+
+  .meal-list { display: flex; flex-direction: column; gap: 6px; }
+  .meal-item {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 9px 12px; background: var(--surface2); border-radius: var(--radius);
+    font-size: 14px; gap: 8px;
+  }
+  .meal-name { flex: 1; color: var(--text); min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .meal-cal  { font-weight: 500; color: var(--text); white-space: nowrap; margin-right: 8px; }
+  .del-btn {
+    background: none; border: none; cursor: pointer; color: var(--text-tertiary);
+    font-size: 18px; line-height: 1; padding: 2px 4px; border-radius: 4px; flex-shrink: 0;
+  }
+  .del-btn:hover { color: var(--red); background: var(--red-bg); }
+  .empty { font-size: 13px; color: var(--text-tertiary); text-align: center; padding: 1.25rem; }
+
+  /* ── Weight ─────────────────────────────────────── */
+  .weight-display { margin-bottom: 12px; text-align: center; }
+  .weight-val { font-size: 28px; font-weight: 600; color: var(--text); }
+  .weight-sub { font-size: 12px; color: var(--text-secondary); margin-top: 2px; }
+  .weigh-row { display: flex; gap: 8px; }
+  .weigh-row input {
+    flex: 1; border: 1px solid var(--border-md); border-radius: var(--radius);
+    padding: 8px 10px; font-size: 14px; font-family: inherit;
+    background: var(--bg); color: var(--text); outline: none;
+  }
+  .weigh-row input:focus { border-color: #888; }
+
+  .chart-wrap { position: relative; width: 100%; height: 220px; margin-top: 1.25rem; }
+  .chart-empty { font-size: 13px; color: var(--text-tertiary); text-align: center; padding: 2rem; }
+
+  /* ── Loading ────────────────────────────────────── */
+  .loading { text-align: center; padding: 3rem; color: var(--text-secondary); font-size: 14px; }
+</style>
+</head>
+<body>
+
+<!-- Auth screen -->
+<div id="authScreen" style="display:none;">
+  <div class="auth-box">
+    <h2 id="authTitle">Welcome back</h2>
+    <p class="auth-sub" id="authSub">Sign in to your account</p>
+    <div class="auth-error" id="authError"></div>
+    <div class="auth-field">
+      <label for="authUsername">Username</label>
+      <input type="text" id="authUsername" placeholder="your username" autocomplete="username" autocapitalize="none" />
+    </div>
+    <div class="auth-field">
+      <label for="authPassword">Password</label>
+      <input type="password" id="authPassword" placeholder="••••••••" autocomplete="current-password" />
+    </div>
+    <button class="btn-primary" id="authSubmitBtn">Sign in</button>
+    <div class="auth-switch" id="authSwitch">
+      Don't have an account? <a id="authToggle">Create one</a>
+    </div>
+  </div>
+</div>
+
+<!-- Main app -->
+<div id="appScreen" style="display:none;">
+  <div class="container">
+    <div class="app-header">
+      <h1>Calorie Tracker <span>/ daily log</span></h1>
+      <div class="user-pill">
+        <span id="usernameDisplay"></span>
+        <button class="btn-logout" id="logoutBtn">Sign out</button>
+      </div>
+    </div>
+
+    <div class="day-nav">
+      <button class="nav-btn" id="prevBtn">← Prev</button>
+      <span class="day-label" id="dayLabel"></span>
+      <button class="nav-btn" id="nextBtn">Next →</button>
+    </div>
+
+    <div class="week-strip">
+      <div class="week-strip-label" id="weekRangeLabel"></div>
+      <div class="week-days" id="weekDays"></div>
+    </div>
+
+    <div class="goal-section">
+      <div class="goal-edit-row">
+        <label for="goalInput">Daily goal</label>
+        <input type="number" id="goalInput" min="100" max="10000" step="50" placeholder="2000" />
+        <button class="btn-sm" id="saveGoalBtn">Save</button>
+      </div>
+      <div class="stats-row">
+        <div class="stat">
+          <div class="stat-label">Consumed</div>
+          <div class="stat-val" id="consumed">0</div>
+          <div class="stat-unit">kcal</div>
+        </div>
+        <div class="stat">
+          <div class="stat-label">Remaining</div>
+          <div class="stat-val" id="remaining">—</div>
+          <div class="stat-unit">kcal</div>
+        </div>
+        <div class="stat">
+          <div class="stat-label">Goal</div>
+          <div class="stat-val" id="goalDisplay">—</div>
+          <div class="stat-unit">kcal / day</div>
+        </div>
+      </div>
+      <div class="progress-header">
+        <span>Progress</span>
+        <span class="pct-label" id="pctLabel">—</span>
+      </div>
+      <div class="bar-track">
+        <div class="bar-fill bar-green" id="barFill" style="width:0%"></div>
+      </div>
+      <div class="bar-axis">
+        <span>0</span>
+        <span id="goalMark">—</span>
+      </div>
+    </div>
+
+    <div class="section">
+      <div class="section-title">
+        <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 2v7c0 1.1.9 2 2 2h4a2 2 0 0 0 2-2V2"/><path d="M7 2v20"/><path d="M21 15V2"/><path d="M18 15h.01"/><path d="M15 15a3 3 0 1 0 6 0 3 3 0 0 0-6 0z"/></svg>
+        Meals &amp; entries
+      </div>
+      <div class="add-row">
+        <input class="input-name" type="text" id="mealName" placeholder="Food or meal name" autocomplete="off" />
+        <input class="input-cal" type="number" id="mealCal" placeholder="Calories" min="0" autocomplete="off" />
+        <button class="btn-add" id="addMealBtn">+ Add</button>
+      </div>
+      <div class="meal-list" id="mealList"></div>
+    </div>
+
+    <div class="section">
+      <div class="section-title">
+        <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 20V10a8 8 0 0 1 16 0v10"/><path d="M2 20h20"/><path d="M12 12v4"/><path d="M10 14h4"/></svg>
+        Weight
+      </div>
+      <div class="weight-display" id="weightDisplay"></div>
+      <div class="weigh-row">
+        <input type="number" id="weightInput" placeholder="Enter weight (lbs)" step="0.1" min="0" />
+        <button class="btn-sm" id="saveWeightBtn">Log weight</button>
+      </div>
+      <div id="weightChartArea">
+        <div class="chart-empty" id="weightChartEmpty">Log a few weigh-ins to see your trend here.</div>
+        <div class="chart-wrap" id="weightChartWrap" style="display:none;">
+          <canvas id="weightChart" role="img" aria-label="Line chart of weight over time"></canvas>
+        </div>
+      </div>
+    </div>
+
+  </div>
+</div>
+
+<div id="loadingScreen" class="loading">Loading…</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.js"></script>
+<script>
+// ── State ──────────────────────────────────────────────────────────────────
+let token = localStorage.getItem('cal_token') || null;
+let username = localStorage.getItem('cal_username') || null;
+let goal = parseInt(localStorage.getItem('cal_goal')) || 2000;
+let currentDate = new Date(); currentDate.setHours(0,0,0,0);
+let currentDayData = { meals: [], weight: null };
+let weekData = [];
+let weightChartInstance = null;
+let isLoginMode = true;
+
+// ── API helpers ────────────────────────────────────────────────────────────
+async function api(method, path, body) {
+  const opts = {
+    method,
+    headers: { 'Content-Type': 'application/json' }
+  };
+  if (token) opts.headers['Authorization'] = 'Bearer ' + token;
+  if (body) opts.body = JSON.stringify(body);
+  const res = await fetch('/api' + path, opts);
+  const data = await res.json();
+  if (!res.ok) throw new Error(data.error || 'Request failed');
+  return data;
+}
+
+function dateKey(d) { return d.toISOString().slice(0,10); }
+
+function formatLabel(d) {
+  const today = new Date(); today.setHours(0,0,0,0);
+  const diff = Math.round((d - today) / 86400000);
+  const fmt = d.toLocaleDateString('en-US', { weekday:'short', month:'short', day:'numeric' });
+  if (diff === 0) return 'Today — ' + fmt;
+  if (diff === -1) return 'Yesterday — ' + fmt;
+  return fmt + (d.getFullYear() !== today.getFullYear() ? ', ' + d.getFullYear() : '');
+}
+
+function weekStart(d) {
+  const day = d.getDay();
+  const diff = (day === 0) ? -6 : 1 - day;
+  const s = new Date(d); s.setDate(d.getDate() + diff); s.setHours(0,0,0,0);
+  return s;
+}
+
+function escHtml(s) {
+  return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+
+// ── Auth ───────────────────────────────────────────────────────────────────
+function showAuth() {
+  document.getElementById('loadingScreen').style.display = 'none';
+  document.getElementById('appScreen').style.display = 'none';
+  document.getElementById('authScreen').style.display = 'flex';
+}
+
+function showApp() {
+  document.getElementById('loadingScreen').style.display = 'none';
+  document.getElementById('authScreen').style.display = 'none';
+  document.getElementById('appScreen').style.display = 'block';
+  document.getElementById('usernameDisplay').textContent = username;
+  document.getElementById('goalInput').value = goal;
+  loadDay();
+}
+
+function setAuthMode(loginMode) {
+  isLoginMode = loginMode;
+  document.getElementById('authTitle').textContent = loginMode ? 'Welcome back' : 'Create account';
+  document.getElementById('authSub').textContent = loginMode ? 'Sign in to your account' : 'Pick a username and password';
+  document.getElementById('authSubmitBtn').textContent = loginMode ? 'Sign in' : 'Create account';
+  document.getElementById('authToggle').textContent = loginMode ? 'Create one' : 'Sign in instead';
+  document.getElementById('authSwitch').innerHTML = loginMode
+    ? `Don't have an account? <a id="authToggle">Create one</a>`
+    : `Already have an account? <a id="authToggle">Sign in instead</a>`;
+  document.getElementById('authError').style.display = 'none';
+  document.getElementById('authToggle').addEventListener('click', () => setAuthMode(!isLoginMode));
+}
+
+document.getElementById('authToggle').addEventListener('click', () => setAuthMode(false));
+
+document.getElementById('authSubmitBtn').addEventListener('click', async () => {
+  const uname = document.getElementById('authUsername').value.trim();
+  const pass = document.getElementById('authPassword').value;
+  const errEl = document.getElementById('authError');
+  const btn = document.getElementById('authSubmitBtn');
+  errEl.style.display = 'none';
+  if (!uname || !pass) { errEl.textContent = 'Please fill in all fields'; errEl.style.display = 'block'; return; }
+  btn.disabled = true;
+  btn.textContent = isLoginMode ? 'Signing in…' : 'Creating account…';
+  try {
+    const data = await api('POST', isLoginMode ? '/login' : '/register', { username: uname, password: pass });
+    token = data.token;
+    username = data.username;
+    goal = data.goal || 2000;
+    localStorage.setItem('cal_token', token);
+    localStorage.setItem('cal_username', username);
+    localStorage.setItem('cal_goal', String(goal));
+    showApp();
+  } catch (err) {
+    errEl.textContent = err.message;
+    errEl.style.display = 'block';
+  } finally {
+    btn.disabled = false;
+    btn.textContent = isLoginMode ? 'Sign in' : 'Create account';
+  }
+});
+
+['authUsername','authPassword'].forEach(id => {
+  document.getElementById(id).addEventListener('keydown', e => {
+    if (e.key === 'Enter') document.getElementById('authSubmitBtn').click();
+  });
+});
+
+document.getElementById('logoutBtn').addEventListener('click', () => {
+  token = null; username = null;
+  localStorage.removeItem('cal_token');
+  localStorage.removeItem('cal_username');
+  showAuth();
+});
+
+// ── Data loading ───────────────────────────────────────────────────────────
+async function loadDay() {
+  const dk = dateKey(currentDate);
+  try {
+    currentDayData = await api('GET', '/days/' + dk);
+  } catch {
+    currentDayData = { meals: [], weight: null };
+  }
+  await loadWeek();
+  await loadWeightChart();
+  render();
+}
+
+async function loadWeek() {
+  const ws = weekStart(currentDate);
+  try {
+    weekData = await api('GET', '/week/' + dateKey(ws));
+  } catch {
+    weekData = [];
+  }
+}
+
+async function loadWeightChart() {
+  try {
+    const entries = await api('GET', '/weights');
+    renderWeightChart(entries);
+  } catch {
+    renderWeightChart([]);
+  }
+}
+
+// ── Render ─────────────────────────────────────────────────────────────────
+function render() {
+  const total = currentDayData.meals.reduce((s, m) => s + m.calories, 0);
+
+  document.getElementById('dayLabel').textContent = formatLabel(currentDate);
+  document.getElementById('consumed').textContent = total.toLocaleString();
+  document.getElementById('goalDisplay').textContent = goal ? goal.toLocaleString() : '—';
+  document.getElementById('goalMark').textContent = goal ? goal.toLocaleString() + ' kcal' : '—';
+  document.getElementById('goalInput').value = goal;
+
+  if (goal) {
+    const pct = Math.min(100, Math.round((total / goal) * 100));
+    const rem = goal - total;
+    document.getElementById('remaining').textContent = rem >= 0 ? rem.toLocaleString() : '-' + Math.abs(rem).toLocaleString();
+    document.getElementById('pctLabel').textContent = pct + '%';
+    const bar = document.getElementById('barFill');
+    bar.style.width = pct + '%';
+    bar.className = 'bar-fill ' + (pct >= 125 ? 'bar-red' : pct >= 100 ? 'bar-amber' : 'bar-green');
+  } else {
+    document.getElementById('remaining').textContent = '—';
+    document.getElementById('pctLabel').textContent = '—';
+    document.getElementById('barFill').style.width = '0%';
+  }
+
+  const list = document.getElementById('mealList');
+  if (currentDayData.meals.length === 0) {
+    list.innerHTML = '<div class="empty">No entries yet — add your first meal above.</div>';
+  } else {
+    list.innerHTML = currentDayData.meals.map(m =>
+      `<div class="meal-item">
+        <span class="meal-name">${escHtml(m.name)}</span>
+        <span class="meal-cal">${m.calories.toLocaleString()} kcal</span>
+        <button class="del-btn" onclick="deleteMeal(${m.id})" aria-label="Remove ${escHtml(m.name)}">×</button>
+      </div>`
+    ).join('');
+  }
+
+  const wd = document.getElementById('weightDisplay');
+  if (currentDayData.weight) {
+    wd.innerHTML = `<div class="weight-val">${currentDayData.weight} <span style="font-size:16px;font-weight:400;">lbs</span></div><div class="weight-sub">Logged for this day</div>`;
+    document.getElementById('weightInput').value = currentDayData.weight;
+  } else {
+    wd.innerHTML = '';
+    document.getElementById('weightInput').value = '';
+  }
+
+  renderWeekStrip();
+}
+
+function renderWeekStrip() {
+  const today = new Date(); today.setHours(0,0,0,0);
+  const selKey = dateKey(currentDate);
+  const ws = weekStart(currentDate);
+  const we = new Date(ws.getTime() + 6 * 86400000);
+  const fmtShort = d => d.toLocaleDateString('en-US', { month:'short', day:'numeric' });
+  document.getElementById('weekRangeLabel').textContent = fmtShort(ws) + ' – ' + fmtShort(we);
+
+  const DAY_NAMES = ['Mon','Tue','Wed','Thu','Fri','Sat','Sun'];
+  let html = '';
+  for (let i = 0; i < 7; i++) {
+    const d = new Date(ws.getTime() + i * 86400000);
+    const dk = dateKey(d);
+    const isToday = dk === dateKey(today);
+    const isSel = dk === selKey;
+    const isFuture = d > today;
+
+    const wd = weekData.find(r => r.date && r.date.slice(0,10) === dk);
+    const total = wd ? parseInt(wd.total_calories) : 0;
+
+    let dotClass = 'dot-future';
+    let calLabel = '—';
+    if (!isFuture) {
+      if (total === 0) { dotClass = ''; calLabel = '0'; }
+      else if (!goal || total <= goal) { dotClass = 'dot-green'; }
+      else if (total <= goal * 1.25) { dotClass = 'dot-amber'; }
+      else { dotClass = 'dot-red'; }
+      calLabel = total > 0 ? (total >= 1000 ? (total/1000).toFixed(1)+'k' : String(total)) : '0';
+    }
+
+    const classes = ['week-day', isToday ? 'is-today' : '', isSel ? 'is-selected' : ''].filter(Boolean).join(' ');
+    html += `<div class="${classes}" onclick="jumpToDate('${dk}')">
+      <span class="wd-name">${DAY_NAMES[i]}</span>
+      <span class="wd-date">${d.getDate()}</span>
+      <span class="wd-dot ${dotClass}"></span>
+      <span class="wd-cal">${calLabel}</span>
+    </div>`;
+  }
+  document.getElementById('weekDays').innerHTML = html;
+}
+
+function renderWeightChart(entries) {
+  const empty = document.getElementById('weightChartEmpty');
+  const wrap = document.getElementById('weightChartWrap');
+  if (!entries || entries.length < 2) {
+    empty.style.display = '';
+    wrap.style.display = 'none';
+    if (weightChartInstance) { weightChartInstance.destroy(); weightChartInstance = null; }
+    return;
+  }
+  empty.style.display = 'none';
+  wrap.style.display = '';
+
+  const labels = entries.map(e => {
+    const d = new Date(e.date + 'T00:00:00');
+    return d.toLocaleDateString('en-US', { month:'short', day:'numeric' });
+  });
+  const weights = entries.map(e => parseFloat(e.weight));
+  const minW = Math.min(...weights), maxW = Math.max(...weights);
+  const pad = Math.max(1, (maxW - minW) * 0.3) || 2;
+
+  if (weightChartInstance) weightChartInstance.destroy();
+  weightChartInstance = new Chart(document.getElementById('weightChart'), {
+    type: 'line',
+    data: {
+      labels,
+      datasets: [{
+        label: 'Weight (lbs)',
+        data: weights,
+        borderColor: '#5a9fd4',
+        backgroundColor: 'rgba(90,159,212,0.12)',
+        borderWidth: 2,
+        pointRadius: 4,
+        pointBackgroundColor: '#5a9fd4',
+        pointBorderColor: '#252523',
+        pointBorderWidth: 2,
+        tension: 0.35,
+        fill: true,
+      }]
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      plugins: {
+        legend: { display: false },
+        tooltip: {
+          backgroundColor: '#2e2e2b',
+          titleColor: '#a0a09c',
+          bodyColor: '#f0f0ec',
+          borderColor: 'rgba(255,255,255,0.12)',
+          borderWidth: 1,
+          callbacks: { label: ctx => ctx.parsed.y.toFixed(1) + ' lbs' }
+        }
+      },
+      scales: {
+        x: {
+          ticks: { color: '#6b6b67', font: { size: 11, family: 'Inter' }, maxRotation: 45, autoSkip: true, maxTicksLimit: 10 },
+          grid: { color: 'rgba(255,255,255,0.06)' },
+          border: { color: 'rgba(255,255,255,0.1)' }
+        },
+        y: {
+          min: Math.floor(minW - pad),
+          max: Math.ceil(maxW + pad),
+          ticks: { color: '#6b6b67', font: { size: 11, family: 'Inter' }, callback: v => v + ' lbs' },
+          grid: { color: 'rgba(255,255,255,0.06)' },
+          border: { color: 'rgba(255,255,255,0.1)' }
+        }
+      }
+    }
+  });
+}
+
+// ── Actions ────────────────────────────────────────────────────────────────
+window.jumpToDate = function(dk) {
+  currentDate = new Date(dk + 'T00:00:00');
+  loadDay();
+};
+
+window.deleteMeal = async function(id) {
+  try {
+    await api('DELETE', '/meals/' + id);
+    currentDayData.meals = currentDayData.meals.filter(m => m.id !== id);
+    render();
+  } catch(err) { alert(err.message); }
+};
+
+document.getElementById('addMealBtn').addEventListener('click', async () => {
+  const name = document.getElementById('mealName').value.trim();
+  const calories = parseInt(document.getElementById('mealCal').value);
+  if (!name || isNaN(calories) || calories < 0) return;
+  const btn = document.getElementById('addMealBtn');
+  btn.disabled = true;
+  try {
+    const meal = await api('POST', '/days/' + dateKey(currentDate) + '/meals', { name, calories });
+    currentDayData.meals.push(meal);
+    document.getElementById('mealName').value = '';
+    document.getElementById('mealCal').value = '';
+    document.getElementById('mealName').focus();
+    await loadWeek();
+    render();
+  } catch(err) { alert(err.message); }
+  finally { btn.disabled = false; }
+});
+
+document.getElementById('mealName').addEventListener('keydown', e => { if (e.key === 'Enter') document.getElementById('mealCal').focus(); });
+document.getElementById('mealCal').addEventListener('keydown', e => { if (e.key === 'Enter') document.getElementById('addMealBtn').click(); });
+
+document.getElementById('saveGoalBtn').addEventListener('click', async () => {
+  const g = parseInt(document.getElementById('goalInput').value);
+  if (isNaN(g) || g < 1) return;
+  try {
+    await api('PUT', '/goal', { goal: g });
+    goal = g;
+    localStorage.setItem('cal_goal', String(g));
+    render();
+  } catch(err) { alert(err.message); }
+});
+document.getElementById('goalInput').addEventListener('keydown', e => { if (e.key === 'Enter') document.getElementById('saveGoalBtn').click(); });
+
+document.getElementById('saveWeightBtn').addEventListener('click', async () => {
+  const w = parseFloat(document.getElementById('weightInput').value);
+  if (isNaN(w) || w <= 0) return;
+  try {
+    await api('PUT', '/days/' + dateKey(currentDate) + '/weight', { weight: w });
+    currentDayData.weight = w;
+    await loadWeightChart();
+    render();
+  } catch(err) { alert(err.message); }
+});
+document.getElementById('weightInput').addEventListener('keydown', e => { if (e.key === 'Enter') document.getElementById('saveWeightBtn').click(); });
+
+document.getElementById('prevBtn').addEventListener('click', () => { currentDate = new Date(currentDate.getTime() - 86400000); loadDay(); });
+document.getElementById('nextBtn').addEventListener('click', () => { currentDate = new Date(currentDate.getTime() + 86400000); loadDay(); });
+
+// ── Init ───────────────────────────────────────────────────────────────────
+if (token) {
+  showApp();
+} else {
+  showAuth();
+}
+</script>
+</body>
+</html>
