@@ -1,21 +1,270 @@
-{
-  "name": "calorie-tracker",
-  "version": "1.0.0",
-  "description": "Personal calorie and weight tracker",
-  "main": "server.js",
-  "scripts": {
-    "start": "node server.js",
-    "dev": "nodemon server.js"
-  },
-  "dependencies": {
-    "bcryptjs": "^2.4.3",
-    "cors": "^2.8.5",
-    "dotenv": "^16.3.1",
-    "express": "^4.18.2",
-    "jsonwebtoken": "^9.0.2",
-    "pg": "^8.11.3"
-  },
-  "devDependencies": {
-    "nodemon": "^3.0.2"
+require('dotenv').config();
+const express = require('express');
+const { Pool } = require('pg');
+const bcrypt = require('bcryptjs');
+const jwt = require('jsonwebtoken');
+const cors = require('cors');
+const path = require('path');
+
+const app = express();
+const PORT = process.env.PORT || 3000;
+const JWT_SECRET = process.env.JWT_SECRET || 'dev_secret_change_this';
+
+const pool = new Pool({
+  connectionString: process.env.DATABASE_URL,
+  ssl: process.env.DATABASE_URL && process.env.DATABASE_URL.includes('railway')
+    ? { rejectUnauthorized: false }
+    : false
+});
+
+app.use(cors());
+app.use(express.json());
+app.use(express.static(path.join(__dirname, 'public')));
+
+// ─── DB INIT ────────────────────────────────────────────────────────────────
+
+async function initDB() {
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS users (
+      id        SERIAL PRIMARY KEY,
+      username  TEXT UNIQUE NOT NULL,
+      password  TEXT NOT NULL,
+      goal      INTEGER DEFAULT 2000,
+      created_at TIMESTAMPTZ DEFAULT NOW()
+    );
+
+    CREATE TABLE IF NOT EXISTS days (
+      id       SERIAL PRIMARY KEY,
+      user_id  INTEGER REFERENCES users(id) ON DELETE CASCADE,
+      date     DATE NOT NULL,
+      weight   NUMERIC(5,1),
+      UNIQUE(user_id, date)
+    );
+
+    CREATE TABLE IF NOT EXISTS meals (
+      id       SERIAL PRIMARY KEY,
+      day_id   INTEGER REFERENCES days(id) ON DELETE CASCADE,
+      name     TEXT NOT NULL,
+      calories INTEGER NOT NULL,
+      created_at TIMESTAMPTZ DEFAULT NOW()
+    );
+  `);
+  console.log('Database ready');
+}
+
+// ─── AUTH MIDDLEWARE ─────────────────────────────────────────────────────────
+
+function authMiddleware(req, res, next) {
+  const header = req.headers.authorization;
+  if (!header || !header.startsWith('Bearer ')) {
+    return res.status(401).json({ error: 'Unauthorized' });
+  }
+  try {
+    const payload = jwt.verify(header.slice(7), JWT_SECRET);
+    req.userId = payload.userId;
+    next();
+  } catch {
+    return res.status(401).json({ error: 'Invalid token' });
   }
 }
+
+// ─── AUTH ROUTES ─────────────────────────────────────────────────────────────
+
+// Register
+app.post('/api/register', async (req, res) => {
+  const { username, password } = req.body;
+  if (!username || !password) return res.status(400).json({ error: 'Username and password required' });
+  if (username.length < 3) return res.status(400).json({ error: 'Username must be at least 3 characters' });
+  if (password.length < 4) return res.status(400).json({ error: 'Password must be at least 4 characters' });
+
+  try {
+    const hash = await bcrypt.hash(password, 10);
+    const result = await pool.query(
+      'INSERT INTO users (username, password) VALUES ($1, $2) RETURNING id, username, goal',
+      [username.toLowerCase().trim(), hash]
+    );
+    const user = result.rows[0];
+    const token = jwt.sign({ userId: user.id }, JWT_SECRET, { expiresIn: '90d' });
+    res.json({ token, username: user.username, goal: user.goal });
+  } catch (err) {
+    if (err.code === '23505') return res.status(409).json({ error: 'Username already taken' });
+    console.error(err);
+    res.status(500).json({ error: 'Server error' });
+  }
+});
+
+// Login
+app.post('/api/login', async (req, res) => {
+  const { username, password } = req.body;
+  if (!username || !password) return res.status(400).json({ error: 'Username and password required' });
+
+  try {
+    const result = await pool.query(
+      'SELECT * FROM users WHERE username = $1',
+      [username.toLowerCase().trim()]
+    );
+    const user = result.rows[0];
+    if (!user) return res.status(401).json({ error: 'Invalid username or password' });
+
+    const match = await bcrypt.compare(password, user.password);
+    if (!match) return res.status(401).json({ error: 'Invalid username or password' });
+
+    const token = jwt.sign({ userId: user.id }, JWT_SECRET, { expiresIn: '90d' });
+    res.json({ token, username: user.username, goal: user.goal });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Server error' });
+  }
+});
+
+// ─── USER ROUTES ─────────────────────────────────────────────────────────────
+
+// Update calorie goal
+app.put('/api/goal', authMiddleware, async (req, res) => {
+  const { goal } = req.body;
+  if (!goal || isNaN(goal) || goal < 1) return res.status(400).json({ error: 'Invalid goal' });
+  await pool.query('UPDATE users SET goal = $1 WHERE id = $2', [goal, req.userId]);
+  res.json({ goal });
+});
+
+// ─── DAY HELPERS ─────────────────────────────────────────────────────────────
+
+async function getOrCreateDay(userId, date) {
+  let result = await pool.query(
+    'SELECT * FROM days WHERE user_id = $1 AND date = $2',
+    [userId, date]
+  );
+  if (result.rows.length === 0) {
+    result = await pool.query(
+      'INSERT INTO days (user_id, date) VALUES ($1, $2) RETURNING *',
+      [userId, date]
+    );
+  }
+  return result.rows[0];
+}
+
+// ─── DAY ROUTES ──────────────────────────────────────────────────────────────
+
+// Get a specific day with its meals
+app.get('/api/days/:date', authMiddleware, async (req, res) => {
+  const { date } = req.params;
+  try {
+    const day = await getOrCreateDay(req.userId, date);
+    const meals = await pool.query(
+      'SELECT id, name, calories FROM meals WHERE day_id = $1 ORDER BY created_at',
+      [day.id]
+    );
+    res.json({ date, weight: day.weight, meals: meals.rows });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Server error' });
+  }
+});
+
+// Get all days for the weight chart (only days with weight)
+app.get('/api/weights', authMiddleware, async (req, res) => {
+  try {
+    const result = await pool.query(
+      'SELECT date, weight FROM days WHERE user_id = $1 AND weight IS NOT NULL ORDER BY date',
+      [req.userId]
+    );
+    res.json(result.rows);
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Server error' });
+  }
+});
+
+// Get a week's summary (for the weekly strip)
+app.get('/api/week/:startDate', authMiddleware, async (req, res) => {
+  const { startDate } = req.params;
+  try {
+    const result = await pool.query(`
+      SELECT
+        d.date,
+        d.weight,
+        COALESCE(SUM(m.calories), 0) AS total_calories
+      FROM generate_series(
+        $1::date, $1::date + interval '6 days', interval '1 day'
+      ) AS gs(date)
+      LEFT JOIN days d ON d.date = gs.date AND d.user_id = $2
+      LEFT JOIN meals m ON m.day_id = d.id
+      GROUP BY d.date, d.weight, gs.date
+      ORDER BY gs.date
+    `, [startDate, req.userId]);
+    res.json(result.rows);
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Server error' });
+  }
+});
+
+// Log weight for a day
+app.put('/api/days/:date/weight', authMiddleware, async (req, res) => {
+  const { date } = req.params;
+  const { weight } = req.body;
+  if (!weight || isNaN(weight)) return res.status(400).json({ error: 'Invalid weight' });
+  try {
+    const day = await getOrCreateDay(req.userId, date);
+    await pool.query('UPDATE days SET weight = $1 WHERE id = $2', [weight, day.id]);
+    res.json({ date, weight });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Server error' });
+  }
+});
+
+// ─── MEAL ROUTES ─────────────────────────────────────────────────────────────
+
+// Add a meal
+app.post('/api/days/:date/meals', authMiddleware, async (req, res) => {
+  const { date } = req.params;
+  const { name, calories } = req.body;
+  if (!name || !calories || isNaN(calories)) return res.status(400).json({ error: 'Name and calories required' });
+  try {
+    const day = await getOrCreateDay(req.userId, date);
+    const result = await pool.query(
+      'INSERT INTO meals (day_id, name, calories) VALUES ($1, $2, $3) RETURNING id, name, calories',
+      [day.id, name, calories]
+    );
+    res.json(result.rows[0]);
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Server error' });
+  }
+});
+
+// Delete a meal
+app.delete('/api/meals/:id', authMiddleware, async (req, res) => {
+  const { id } = req.params;
+  try {
+    // Make sure the meal belongs to this user
+    const check = await pool.query(`
+      SELECT m.id FROM meals m
+      JOIN days d ON d.id = m.day_id
+      WHERE m.id = $1 AND d.user_id = $2
+    `, [id, req.userId]);
+    if (check.rows.length === 0) return res.status(404).json({ error: 'Not found' });
+
+    await pool.query('DELETE FROM meals WHERE id = $1', [id]);
+    res.json({ ok: true });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Server error' });
+  }
+});
+
+// ─── CATCH-ALL ───────────────────────────────────────────────────────────────
+
+app.get('*', (req, res) => {
+  res.sendFile(path.join(__dirname, 'public', 'index.html'));
+});
+
+// ─── START ───────────────────────────────────────────────────────────────────
+
+initDB().then(() => {
+  app.listen(PORT, () => console.log(`Calorie tracker running on port ${PORT}`));
+}).catch(err => {
+  console.error('Failed to initialize database:', err);
+  process.exit(1);
+});
