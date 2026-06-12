@@ -70,13 +70,11 @@ function authMiddleware(req, res, next) {
 
 // ─── AUTH ROUTES ─────────────────────────────────────────────────────────────
 
-// Register
 app.post('/api/register', async (req, res) => {
   const { username, password } = req.body;
   if (!username || !password) return res.status(400).json({ error: 'Username and password required' });
   if (username.length < 3) return res.status(400).json({ error: 'Username must be at least 3 characters' });
   if (password.length < 4) return res.status(400).json({ error: 'Password must be at least 4 characters' });
-
   try {
     const hash = await bcrypt.hash(password, 10);
     const result = await pool.query(
@@ -93,22 +91,15 @@ app.post('/api/register', async (req, res) => {
   }
 });
 
-// Login
 app.post('/api/login', async (req, res) => {
   const { username, password } = req.body;
   if (!username || !password) return res.status(400).json({ error: 'Username and password required' });
-
   try {
-    const result = await pool.query(
-      'SELECT * FROM users WHERE username = $1',
-      [username.toLowerCase().trim()]
-    );
+    const result = await pool.query('SELECT * FROM users WHERE username = $1', [username.toLowerCase().trim()]);
     const user = result.rows[0];
     if (!user) return res.status(401).json({ error: 'Invalid username or password' });
-
     const match = await bcrypt.compare(password, user.password);
     if (!match) return res.status(401).json({ error: 'Invalid username or password' });
-
     const token = jwt.sign({ userId: user.id }, JWT_SECRET, { expiresIn: '90d' });
     res.json({ token, username: user.username, goal: user.goal });
   } catch (err) {
@@ -119,7 +110,6 @@ app.post('/api/login', async (req, res) => {
 
 // ─── USER ROUTES ─────────────────────────────────────────────────────────────
 
-// Update calorie goal
 app.put('/api/goal', authMiddleware, async (req, res) => {
   const { goal } = req.body;
   if (!goal || isNaN(goal) || goal < 1) return res.status(400).json({ error: 'Invalid goal' });
@@ -130,30 +120,20 @@ app.put('/api/goal', authMiddleware, async (req, res) => {
 // ─── DAY HELPERS ─────────────────────────────────────────────────────────────
 
 async function getOrCreateDay(userId, date) {
-  let result = await pool.query(
-    'SELECT * FROM days WHERE user_id = $1 AND date = $2',
-    [userId, date]
-  );
+  let result = await pool.query('SELECT * FROM days WHERE user_id = $1 AND date = $2', [userId, date]);
   if (result.rows.length === 0) {
-    result = await pool.query(
-      'INSERT INTO days (user_id, date) VALUES ($1, $2) RETURNING *',
-      [userId, date]
-    );
+    result = await pool.query('INSERT INTO days (user_id, date) VALUES ($1, $2) RETURNING *', [userId, date]);
   }
   return result.rows[0];
 }
 
 // ─── DAY ROUTES ──────────────────────────────────────────────────────────────
 
-// Get a specific day with its meals
 app.get('/api/days/:date', authMiddleware, async (req, res) => {
   const { date } = req.params;
   try {
     const day = await getOrCreateDay(req.userId, date);
-    const meals = await pool.query(
-      'SELECT id, name, calories FROM meals WHERE day_id = $1 ORDER BY created_at',
-      [day.id]
-    );
+    const meals = await pool.query('SELECT id, name, calories FROM meals WHERE day_id = $1 ORDER BY created_at', [day.id]);
     res.json({ date, weight: day.weight, meals: meals.rows });
   } catch (err) {
     console.error(err);
@@ -161,7 +141,6 @@ app.get('/api/days/:date', authMiddleware, async (req, res) => {
   }
 });
 
-// Get all days for the weight chart (only days with weight)
 app.get('/api/weights', authMiddleware, async (req, res) => {
   try {
     const result = await pool.query(
@@ -175,21 +154,17 @@ app.get('/api/weights', authMiddleware, async (req, res) => {
   }
 });
 
-// Get a week's summary (for the weekly strip)
 app.get('/api/week/:startDate', authMiddleware, async (req, res) => {
   const { startDate } = req.params;
   try {
     const result = await pool.query(`
       SELECT
-        d.date,
-        d.weight,
+        gs.date,
         COALESCE(SUM(m.calories), 0) AS total_calories
-      FROM generate_series(
-        $1::date, $1::date + interval '6 days', interval '1 day'
-      ) AS gs(date)
+      FROM generate_series($1::date, $1::date + interval '6 days', interval '1 day') AS gs(date)
       LEFT JOIN days d ON d.date = gs.date AND d.user_id = $2
       LEFT JOIN meals m ON m.day_id = d.id
-      GROUP BY d.date, d.weight, gs.date
+      GROUP BY gs.date
       ORDER BY gs.date
     `, [startDate, req.userId]);
     res.json(result.rows);
@@ -199,7 +174,6 @@ app.get('/api/week/:startDate', authMiddleware, async (req, res) => {
   }
 });
 
-// Log weight for a day
 app.put('/api/days/:date/weight', authMiddleware, async (req, res) => {
   const { date } = req.params;
   const { weight } = req.body;
@@ -216,7 +190,6 @@ app.put('/api/days/:date/weight', authMiddleware, async (req, res) => {
 
 // ─── MEAL ROUTES ─────────────────────────────────────────────────────────────
 
-// Add a meal
 app.post('/api/days/:date/meals', authMiddleware, async (req, res) => {
   const { date } = req.params;
   const { name, calories } = req.body;
@@ -234,23 +207,56 @@ app.post('/api/days/:date/meals', authMiddleware, async (req, res) => {
   }
 });
 
-// Delete a meal
 app.delete('/api/meals/:id', authMiddleware, async (req, res) => {
   const { id } = req.params;
   try {
-    // Make sure the meal belongs to this user
     const check = await pool.query(`
       SELECT m.id FROM meals m
       JOIN days d ON d.id = m.day_id
       WHERE m.id = $1 AND d.user_id = $2
     `, [id, req.userId]);
     if (check.rows.length === 0) return res.status(404).json({ error: 'Not found' });
-
     await pool.query('DELETE FROM meals WHERE id = $1', [id]);
     res.json({ ok: true });
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: 'Server error' });
+  }
+});
+
+// ─── FOOD SEARCH ─────────────────────────────────────────────────────────────
+
+app.get('/api/food-search', authMiddleware, async (req, res) => {
+  const { q } = req.query;
+  if (!q || q.length < 2) return res.json([]);
+  try {
+    const url = `https://world.openfoodfacts.org/cgi/search.pl?search_terms=${encodeURIComponent(q)}&search_simple=1&action=process&json=1&page_size=15&fields=product_name,nutriments,brands,serving_size`;
+    const response = await fetch(url, {
+      headers: { 'User-Agent': 'CalorieTracker/1.0 (personal health app)' }
+    });
+    const data = await response.json();
+
+    const results = (data.products || [])
+      .filter(p => p.product_name && p.nutriments && p.nutriments['energy-kcal_100g'])
+      .map(p => {
+        const kcalPer100g = Math.round(p.nutriments['energy-kcal_100g']);
+        const caloriesPerServing = p.nutriments['energy-kcal_serving']
+          ? Math.round(p.nutriments['energy-kcal_serving'])
+          : null;
+        const brand = p.brands ? p.brands.split(',')[0].trim() : null;
+        return {
+          name: p.product_name + (brand ? ` (${brand})` : ''),
+          caloriesPer100g: kcalPer100g,
+          caloriesPerServing,
+          servingSize: p.serving_size || null
+        };
+      })
+      .slice(0, 8);
+
+    res.json(results);
+  } catch (err) {
+    console.error('Food search error:', err);
+    res.json([]);
   }
 });
 
