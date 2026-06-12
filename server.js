@@ -26,29 +26,42 @@ app.use(express.static(path.join(__dirname, 'public')));
 async function initDB() {
   await pool.query(`
     CREATE TABLE IF NOT EXISTS users (
-      id        SERIAL PRIMARY KEY,
-      username  TEXT UNIQUE NOT NULL,
-      password  TEXT NOT NULL,
-      goal      INTEGER DEFAULT 2000,
+      id         SERIAL PRIMARY KEY,
+      username   TEXT UNIQUE NOT NULL,
+      password   TEXT NOT NULL,
+      goal       INTEGER DEFAULT 2000,
       created_at TIMESTAMPTZ DEFAULT NOW()
     );
 
     CREATE TABLE IF NOT EXISTS days (
-      id       SERIAL PRIMARY KEY,
-      user_id  INTEGER REFERENCES users(id) ON DELETE CASCADE,
-      date     DATE NOT NULL,
-      weight   NUMERIC(5,1),
+      id            SERIAL PRIMARY KEY,
+      user_id       INTEGER REFERENCES users(id) ON DELETE CASCADE,
+      date          DATE NOT NULL,
+      weight        NUMERIC(5,1),
+      bp_systolic   INTEGER,
+      bp_diastolic  INTEGER,
+      heart_rate    INTEGER,
+      water_oz      NUMERIC(5,1),
       UNIQUE(user_id, date)
     );
 
     CREATE TABLE IF NOT EXISTS meals (
-      id       SERIAL PRIMARY KEY,
-      day_id   INTEGER REFERENCES days(id) ON DELETE CASCADE,
-      name     TEXT NOT NULL,
-      calories INTEGER NOT NULL,
+      id         SERIAL PRIMARY KEY,
+      day_id     INTEGER REFERENCES days(id) ON DELETE CASCADE,
+      name       TEXT NOT NULL,
+      calories   INTEGER NOT NULL,
       created_at TIMESTAMPTZ DEFAULT NOW()
     );
   `);
+
+  // Add metric columns to existing tables if upgrading
+  await pool.query(`
+    ALTER TABLE days ADD COLUMN IF NOT EXISTS bp_systolic  INTEGER;
+    ALTER TABLE days ADD COLUMN IF NOT EXISTS bp_diastolic INTEGER;
+    ALTER TABLE days ADD COLUMN IF NOT EXISTS heart_rate   INTEGER;
+    ALTER TABLE days ADD COLUMN IF NOT EXISTS water_oz     NUMERIC(5,1);
+  `).catch(() => {});
+
   console.log('Database ready');
 }
 
@@ -56,9 +69,7 @@ async function initDB() {
 
 function authMiddleware(req, res, next) {
   const header = req.headers.authorization;
-  if (!header || !header.startsWith('Bearer ')) {
-    return res.status(401).json({ error: 'Unauthorized' });
-  }
+  if (!header || !header.startsWith('Bearer ')) return res.status(401).json({ error: 'Unauthorized' });
   try {
     const payload = jwt.verify(header.slice(7), JWT_SECRET);
     req.userId = payload.userId;
@@ -134,20 +145,15 @@ app.get('/api/days/:date', authMiddleware, async (req, res) => {
   try {
     const day = await getOrCreateDay(req.userId, date);
     const meals = await pool.query('SELECT id, name, calories FROM meals WHERE day_id = $1 ORDER BY created_at', [day.id]);
-    res.json({ date, weight: day.weight, meals: meals.rows });
-  } catch (err) {
-    console.error(err);
-    res.status(500).json({ error: 'Server error' });
-  }
-});
-
-app.get('/api/weights', authMiddleware, async (req, res) => {
-  try {
-    const result = await pool.query(
-      'SELECT date, weight FROM days WHERE user_id = $1 AND weight IS NOT NULL ORDER BY date',
-      [req.userId]
-    );
-    res.json(result.rows);
+    res.json({
+      date,
+      weight: day.weight,
+      bp_systolic: day.bp_systolic,
+      bp_diastolic: day.bp_diastolic,
+      heart_rate: day.heart_rate,
+      water_oz: day.water_oz,
+      meals: meals.rows
+    });
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: 'Server error' });
@@ -158,14 +164,11 @@ app.get('/api/week/:startDate', authMiddleware, async (req, res) => {
   const { startDate } = req.params;
   try {
     const result = await pool.query(`
-      SELECT
-        gs.date,
-        COALESCE(SUM(m.calories), 0) AS total_calories
+      SELECT gs.date, COALESCE(SUM(m.calories), 0) AS total_calories
       FROM generate_series($1::date, $1::date + interval '6 days', interval '1 day') AS gs(date)
       LEFT JOIN days d ON d.date = gs.date AND d.user_id = $2
       LEFT JOIN meals m ON m.day_id = d.id
-      GROUP BY gs.date
-      ORDER BY gs.date
+      GROUP BY gs.date ORDER BY gs.date
     `, [startDate, req.userId]);
     res.json(result.rows);
   } catch (err) {
@@ -174,14 +177,58 @@ app.get('/api/week/:startDate', authMiddleware, async (req, res) => {
   }
 });
 
-app.put('/api/days/:date/weight', authMiddleware, async (req, res) => {
+// ─── METRIC HISTORY ROUTES ────────────────────────────────────────────────────
+
+app.get('/api/metrics/weight', authMiddleware, async (req, res) => {
+  const result = await pool.query(
+    'SELECT date, weight FROM days WHERE user_id=$1 AND weight IS NOT NULL ORDER BY date',
+    [req.userId]
+  );
+  res.json(result.rows);
+});
+
+app.get('/api/metrics/bp', authMiddleware, async (req, res) => {
+  const result = await pool.query(
+    'SELECT date, bp_systolic, bp_diastolic FROM days WHERE user_id=$1 AND bp_systolic IS NOT NULL ORDER BY date',
+    [req.userId]
+  );
+  res.json(result.rows);
+});
+
+app.get('/api/metrics/heart-rate', authMiddleware, async (req, res) => {
+  const result = await pool.query(
+    'SELECT date, heart_rate FROM days WHERE user_id=$1 AND heart_rate IS NOT NULL ORDER BY date',
+    [req.userId]
+  );
+  res.json(result.rows);
+});
+
+app.get('/api/metrics/water', authMiddleware, async (req, res) => {
+  const result = await pool.query(
+    'SELECT date, water_oz FROM days WHERE user_id=$1 AND water_oz IS NOT NULL ORDER BY date',
+    [req.userId]
+  );
+  res.json(result.rows);
+});
+
+// ─── LOG METRICS ─────────────────────────────────────────────────────────────
+
+app.put('/api/days/:date/metrics', authMiddleware, async (req, res) => {
   const { date } = req.params;
-  const { weight } = req.body;
-  if (!weight || isNaN(weight)) return res.status(400).json({ error: 'Invalid weight' });
+  const { weight, bp_systolic, bp_diastolic, heart_rate, water_oz } = req.body;
   try {
     const day = await getOrCreateDay(req.userId, date);
-    await pool.query('UPDATE days SET weight = $1 WHERE id = $2', [weight, day.id]);
-    res.json({ date, weight });
+    const updates = [];
+    const vals = [day.id];
+    let idx = 2;
+    if (weight      !== undefined) { updates.push(`weight=$${idx++}`);       vals.push(weight); }
+    if (bp_systolic !== undefined) { updates.push(`bp_systolic=$${idx++}`);  vals.push(bp_systolic); }
+    if (bp_diastolic!== undefined) { updates.push(`bp_diastolic=$${idx++}`); vals.push(bp_diastolic); }
+    if (heart_rate  !== undefined) { updates.push(`heart_rate=$${idx++}`);   vals.push(heart_rate); }
+    if (water_oz    !== undefined) { updates.push(`water_oz=$${idx++}`);     vals.push(water_oz); }
+    if (updates.length === 0) return res.status(400).json({ error: 'No metrics provided' });
+    await pool.query(`UPDATE days SET ${updates.join(', ')} WHERE id=$1`, vals);
+    res.json({ ok: true });
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: 'Server error' });
@@ -211,12 +258,11 @@ app.delete('/api/meals/:id', authMiddleware, async (req, res) => {
   const { id } = req.params;
   try {
     const check = await pool.query(`
-      SELECT m.id FROM meals m
-      JOIN days d ON d.id = m.day_id
-      WHERE m.id = $1 AND d.user_id = $2
+      SELECT m.id FROM meals m JOIN days d ON d.id = m.day_id
+      WHERE m.id=$1 AND d.user_id=$2
     `, [id, req.userId]);
     if (check.rows.length === 0) return res.status(404).json({ error: 'Not found' });
-    await pool.query('DELETE FROM meals WHERE id = $1', [id]);
+    await pool.query('DELETE FROM meals WHERE id=$1', [id]);
     res.json({ ok: true });
   } catch (err) {
     console.error(err);
@@ -231,28 +277,19 @@ app.get('/api/food-search', authMiddleware, async (req, res) => {
   if (!q || q.length < 2) return res.json([]);
   try {
     const url = `https://world.openfoodfacts.org/cgi/search.pl?search_terms=${encodeURIComponent(q)}&search_simple=1&action=process&json=1&page_size=15&fields=product_name,nutriments,brands,serving_size`;
-    const response = await fetch(url, {
-      headers: { 'User-Agent': 'CalorieTracker/1.0 (personal health app)' }
-    });
+    const response = await fetch(url, { headers: { 'User-Agent': 'CalorieTracker/1.0 (personal health app)' } });
     const data = await response.json();
-
     const results = (data.products || [])
       .filter(p => p.product_name && p.nutriments && p.nutriments['energy-kcal_100g'])
       .map(p => {
-        const kcalPer100g = Math.round(p.nutriments['energy-kcal_100g']);
-        const caloriesPerServing = p.nutriments['energy-kcal_serving']
-          ? Math.round(p.nutriments['energy-kcal_serving'])
-          : null;
         const brand = p.brands ? p.brands.split(',')[0].trim() : null;
         return {
           name: p.product_name + (brand ? ` (${brand})` : ''),
-          caloriesPer100g: kcalPer100g,
-          caloriesPerServing,
+          caloriesPer100g: Math.round(p.nutriments['energy-kcal_100g']),
+          caloriesPerServing: p.nutriments['energy-kcal_serving'] ? Math.round(p.nutriments['energy-kcal_serving']) : null,
           servingSize: p.serving_size || null
         };
-      })
-      .slice(0, 8);
-
+      }).slice(0, 8);
     res.json(results);
   } catch (err) {
     console.error('Food search error:', err);
