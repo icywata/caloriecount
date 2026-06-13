@@ -327,7 +327,7 @@ function weekStart(d) {
   const s = new Date(d); s.setDate(d.getDate() + diff); s.setHours(0,0,0,0); return s;
 }
 function fmtDate(str) {
-  return new Date(str + 'T00:00:00').toLocaleDateString('en-US', { month:'short', day:'numeric' });
+  const s = str.slice(0, 10); const [,m,d] = s.split('-').map(Number); return new Date(2000, m-1, d).toLocaleDateString('en-US', { month:'short', day:'numeric' });
 }
 
 // ── Auth ───────────────────────────────────────────────────────────────────
