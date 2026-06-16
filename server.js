@@ -19,7 +19,7 @@ const pool = new Pool({
 
 app.use(cors());
 app.use(express.json());
-app.use(express.static(path.join(__dirname, 'public')));
+app.use(express.static(__dirname));
 
 // ─── DB INIT ────────────────────────────────────────────────────────────────
 
@@ -278,7 +278,7 @@ app.get('/api/food-search', authMiddleware, async (req, res) => {
   const USDA_KEY = process.env.USDA_API_KEY;
   if (!USDA_KEY) return res.status(500).json({ error: 'USDA API key not configured' });
   try {
-    const url = `https://api.nal.usda.gov/fdc/v1/foods/search?query=${encodeURIComponent(q)}&pageSize=20&api_key=${USDA_KEY}&dataType=Foundation,SR%20Legacy,Branded,Survey%20(FNDDS)`;
+    const url = `https://api.nal.usda.gov/fdc/v1/foods/search?query=${encodeURIComponent(q)}&pageSize=20&api_key=${USDA_KEY}&dataType=Foundation,SR%20Legacy,Branded,Survey%20(FNDDS)&fields=fdcId,description,brandOwner,brandName,servingSize,servingSizeUnit,foodNutrients,foodMeasures`;
     const response = await fetch(url);
     const data = await response.json();
 
@@ -348,7 +348,7 @@ app.get('/api/food-search', authMiddleware, async (req, res) => {
 // ─── CATCH-ALL ───────────────────────────────────────────────────────────────
 
 app.get('*', (req, res) => {
-  res.sendFile(path.join(__dirname, 'public', 'index.html'));
+  res.sendFile(path.join(__dirname, 'index.html'));
 });
 
 // ─── START ───────────────────────────────────────────────────────────────────
