@@ -109,6 +109,18 @@
   .ac-name { font-size: 13px; color: var(--text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .ac-meta { font-size: 11px; color: var(--text-secondary); margin-top: 2px; display: flex; gap: 10px; }
   .ac-searching { padding: 12px; font-size: 13px; color: var(--text-tertiary); text-align: center; }
+
+  /* Portion picker */
+  .portion-row { background: var(--surface2); border-radius: var(--radius); padding: 10px 12px; margin-bottom: 1rem; display: flex; flex-direction: column; gap: 8px; }
+  .portion-food-name { font-size: 13px; font-weight: 500; color: var(--text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .portion-controls { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+  .portion-controls input { border: 1px solid var(--border-md); border-radius: var(--radius); padding: 6px 8px; font-size: 14px; font-family: inherit; background: var(--bg); color: var(--text); outline: none; }
+  .portion-controls input:focus { border-color: #888; }
+  .portion-controls select { flex: 1; min-width: 140px; border: 1px solid var(--border-md); border-radius: var(--radius); padding: 6px 8px; font-size: 13px; font-family: inherit; background: var(--bg); color: var(--text); outline: none; cursor: pointer; }
+  .portion-controls select:focus { border-color: #888; }
+  .portion-kcal { font-size: 14px; font-weight: 600; color: var(--green); white-space: nowrap; min-width: 70px; }
+  .portion-clear { background: none; border: none; cursor: pointer; color: var(--text-tertiary); font-size: 20px; line-height: 1; padding: 2px 4px; border-radius: 4px; }
+  .portion-clear:hover { color: var(--red); background: var(--red-bg); }
   .meal-list { display: flex; flex-direction: column; gap: 6px; }
   .meal-item { display: flex; align-items: center; justify-content: space-between; padding: 9px 12px; background: var(--surface2); border-radius: var(--radius); font-size: 14px; gap: 8px; }
   .meal-name { flex: 1; color: var(--text); min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -212,6 +224,16 @@
         <input class="input-cal" type="number" id="mealCal" placeholder="Calories" min="0" autocomplete="off" />
         <button class="btn-add" id="addMealBtn">+ Add</button>
       </div>
+      <!-- Portion picker — shown after selecting a food from autocomplete -->
+      <div class="portion-row" id="portionRow" style="display:none;">
+        <div class="portion-food-name" id="portionFoodName"></div>
+        <div class="portion-controls">
+          <input type="number" id="portionQty" value="1" min="0.25" step="0.25" style="width:70px;" />
+          <select id="portionUnit"></select>
+          <span class="portion-kcal" id="portionKcal"></span>
+          <button class="portion-clear" id="portionClear" title="Clear selection">×</button>
+        </div>
+      </div>
       <div class="meal-list" id="mealList"></div>
     </div>
 
@@ -301,6 +323,7 @@ let weekData = [];
 let charts = { weight: null, bp: null, hr: null, water: null };
 let isLoginMode = true;
 let acResults = [], acFocusIndex = -1, acDebounceTimer = null;
+let selectedFood = null; // { name, portions: [{label, grams, kcal}] }
 
 // ── API ────────────────────────────────────────────────────────────────────
 async function api(method, path, body) {
@@ -400,10 +423,57 @@ function renderDropdown(results, searching) {
 }
 function selectResult(i) {
   const r = acResults[i]; if (!r) return;
+  selectedFood = r;
   mealNameInput.value = r.name;
-  document.getElementById('mealCal').value = r.caloriesPerServing || r.caloriesPer100g;
-  closeDropdown(); document.getElementById('mealCal').focus(); document.getElementById('mealCal').select();
+  closeDropdown();
+  showPortionPicker(r);
 }
+
+function showPortionPicker(food) {
+  const row = document.getElementById('portionRow');
+  const nameEl = document.getElementById('portionFoodName');
+  const unitSel = document.getElementById('portionUnit');
+  const qtyInput = document.getElementById('portionQty');
+  nameEl.textContent = food.name;
+  unitSel.innerHTML = food.portions.map((p, i) =>
+    `<option value="${i}">${p.label} — ${p.kcal} kcal</option>`
+  ).join('');
+  qtyInput.value = 1;
+  row.style.display = '';
+  updatePortionCalc();
+  qtyInput.focus(); qtyInput.select();
+}
+
+function updatePortionCalc() {
+  if (!selectedFood) return;
+  const qty = parseFloat(document.getElementById('portionQty').value) || 1;
+  const idx = parseInt(document.getElementById('portionUnit').value) || 0;
+  const portion = selectedFood.portions[idx];
+  if (!portion) return;
+  const totalKcal = Math.round(portion.kcal * qty);
+  document.getElementById('portionKcal').textContent = totalKcal + ' kcal';
+  document.getElementById('mealCal').value = totalKcal;
+}
+
+function clearPortionPicker() {
+  selectedFood = null;
+  document.getElementById('portionRow').style.display = 'none';
+  document.getElementById('portionFoodName').textContent = '';
+  document.getElementById('portionUnit').innerHTML = '';
+  document.getElementById('portionKcal').textContent = '';
+  document.getElementById('mealCal').value = '';
+}
+document.getElementById('portionQty').addEventListener('input', updatePortionCalc);
+document.getElementById('portionUnit').addEventListener('change', updatePortionCalc);
+document.getElementById('portionClear').addEventListener('click', () => {
+  clearPortionPicker();
+  mealNameInput.value = '';
+  mealNameInput.focus();
+});
+document.getElementById('portionQty').addEventListener('keydown', e => {
+  if (e.key === 'Enter') document.getElementById('addMealBtn').click();
+});
+
 mealNameInput.addEventListener('input', () => {
   const q = mealNameInput.value.trim(); clearTimeout(acDebounceTimer);
   if (q.length < 3) { closeDropdown(); return; }
@@ -661,7 +731,7 @@ document.getElementById('addMealBtn').addEventListener('click', async () => {
     const meal = await api('POST', '/days/' + dateKey(currentDate) + '/meals', { name, calories });
     currentDayData.meals.push(meal);
     mealNameInput.value = ''; document.getElementById('mealCal').value = '';
-    closeDropdown(); mealNameInput.focus();
+    closeDropdown(); clearPortionPicker(); mealNameInput.focus();
     const ws = weekStart(currentDate);
     try { weekData = await api('GET', '/week/' + dateKey(ws)); } catch {}
     render();
