@@ -108,16 +108,17 @@
   .ac-item:hover, .ac-item.focused { background: var(--surface2); }
   .ac-name { font-size: 13px; color: var(--text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .ac-meta { font-size: 11px; color: var(--text-secondary); margin-top: 2px; display: flex; gap: 10px; }
+  .ac-meta-inline { font-size: 11px; color: var(--text-secondary); margin-left: auto; }
   .ac-searching { padding: 12px; font-size: 13px; color: var(--text-tertiary); text-align: center; }
 
   /* Qty row */
-  .qty-row { display: flex; gap: 8px; margin-bottom: 1rem; align-items: center; }
-  .qty-row input[type="number"] { border: 1px solid var(--border-md); border-radius: var(--radius); padding: 8px 10px; font-size: 14px; font-family: inherit; background: var(--bg); color: var(--text); outline: none; }
+  .qty-row { display: flex; gap: 10px; margin-bottom: 1rem; align-items: flex-end; flex-wrap: wrap; }
+  .qty-field { display: flex; flex-direction: column; gap: 4px; }
+  .qty-label { font-size: 11px; color: var(--text-tertiary); text-transform: uppercase; letter-spacing: 0.05em; }
+  .qty-row input[type="number"] { border: 1px solid var(--border-md); border-radius: var(--radius); padding: 8px 10px; font-size: 14px; font-family: inherit; background: var(--bg); color: var(--text); outline: none; width: 100px; }
   .qty-row input[type="number"]:focus { border-color: #888; }
-  #portionQty { width: 68px; flex-shrink: 0; }
-  #portionUnit { flex: 1; min-width: 0; border: 1px solid var(--border-md); border-radius: var(--radius); padding: 8px 10px; font-size: 13px; font-family: inherit; background: var(--bg); color: var(--text); outline: none; cursor: pointer; }
-  #portionUnit:focus { border-color: #888; }
-  #mealCal { width: 90px; flex-shrink: 0; }
+  #portionQty { width: 80px; }
+  .qty-total { font-size: 18px; font-weight: 600; color: var(--green); padding: 7px 0; min-width: 80px; }
   .meal-list { display: flex; flex-direction: column; gap: 6px; }
   .meal-item { display: flex; align-items: center; justify-content: space-between; padding: 9px 12px; background: var(--surface2); border-radius: var(--radius); font-size: 14px; gap: 8px; }
   .meal-name { flex: 1; color: var(--text); min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -213,19 +214,26 @@
         <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 2v7c0 1.1.9 2 2 2h4a2 2 0 0 0 2-2V2"/><path d="M7 2v20"/><path d="M21 15V2"/><path d="M18 15h.01"/><path d="M15 15a3 3 0 1 0 6 0 3 3 0 0 0-6 0z"/></svg>
         Meals &amp; entries
       </div>
-      <!-- Row 1: food search -->
-      <div class="add-row">
-        <div class="meal-input-wrap">
-          <input class="input-name" type="text" id="mealName" placeholder="Search or type a food..." autocomplete="off" />
-          <div class="autocomplete-dropdown" id="acDropdown"></div>
-        </div>
+      <!-- Food name with history autocomplete -->
+      <div class="meal-input-wrap" style="margin-bottom:8px;">
+        <input class="input-name" type="text" id="mealName" placeholder="Food name" autocomplete="off" />
+        <div class="autocomplete-dropdown" id="acDropdown"></div>
       </div>
-      <!-- Row 2: qty + unit + calories + add (shown always, unit dropdown populated after search selection) -->
+      <!-- Cal per unit / qty / total / add -->
       <div class="qty-row">
-        <input type="number" id="portionQty" placeholder="Qty" value="1" min="0.1" step="0.1" />
-        <select id="portionUnit"><option value="manual">— pick a food first —</option></select>
-        <input type="number" id="mealCal" placeholder="Calories" min="0" autocomplete="off" />
-        <button class="btn-add" id="addMealBtn">+ Add</button>
+        <div class="qty-field">
+          <label class="qty-label">Cal / unit</label>
+          <input type="number" id="mealCal" placeholder="e.g. 72" min="0" autocomplete="off" />
+        </div>
+        <div class="qty-field">
+          <label class="qty-label">Quantity</label>
+          <input type="number" id="portionQty" value="1" min="0.1" step="0.1" />
+        </div>
+        <div class="qty-field">
+          <label class="qty-label">Total kcal</label>
+          <div class="qty-total" id="qtyTotal">—</div>
+        </div>
+        <button class="btn-add" id="addMealBtn" style="align-self:flex-end;">+ Add</button>
       </div>
       <div class="meal-list" id="mealList"></div>
     </div>
@@ -316,195 +324,102 @@ let weekData = [];
 let charts = { weight: null, bp: null, hr: null, water: null };
 let isLoginMode = true;
 let acResults = [], acFocusIndex = -1, acDebounceTimer = null;
-let selectedFood = null; // { name, portions: [{label, grams, kcal}] }
 
-// ── API ────────────────────────────────────────────────────────────────────
-async function api(method, path, body) {
-  const opts = { method, headers: { 'Content-Type': 'application/json' } };
-  if (token) opts.headers['Authorization'] = 'Bearer ' + token;
-  if (body) opts.body = JSON.stringify(body);
-  const res = await fetch('/api' + path, opts);
-  const data = await res.json();
-  if (!res.ok) throw new Error(data.error || 'Request failed');
-  return data;
-}
-function dateKey(d) { return d.toISOString().slice(0,10); }
-function escHtml(s) { return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
-function formatLabel(d) {
-  const today = new Date(); today.setHours(0,0,0,0);
-  const diff = Math.round((d - today) / 86400000);
-  const fmt = d.toLocaleDateString('en-US', { weekday:'short', month:'short', day:'numeric' });
-  if (diff === 0) return 'Today — ' + fmt;
-  if (diff === -1) return 'Yesterday — ' + fmt;
-  return fmt + (d.getFullYear() !== today.getFullYear() ? ', ' + d.getFullYear() : '');
-}
-function weekStart(d) {
-  const day = d.getDay(), diff = day === 0 ? -6 : 1 - day;
-  const s = new Date(d); s.setDate(d.getDate() + diff); s.setHours(0,0,0,0); return s;
-}
-function fmtDate(str) {
-  const s = str.slice(0, 10); const [,m,d] = s.split('-').map(Number); return new Date(2000, m-1, d).toLocaleDateString('en-US', { month:'short', day:'numeric' });
-}
-
-// ── Auth ───────────────────────────────────────────────────────────────────
-function showAuth() {
-  document.getElementById('loadingScreen').style.display = 'none';
-  document.getElementById('appScreen').style.display = 'none';
-  document.getElementById('authScreen').style.display = 'flex';
-}
-function showApp() {
-  document.getElementById('loadingScreen').style.display = 'none';
-  document.getElementById('authScreen').style.display = 'none';
-  document.getElementById('appScreen').style.display = 'block';
-  document.getElementById('usernameDisplay').textContent = username;
-  document.getElementById('goalInput').value = goal;
-  loadAll();
-}
-function setAuthMode(loginMode) {
-  isLoginMode = loginMode;
-  document.getElementById('authTitle').textContent = loginMode ? 'Welcome back' : 'Create account';
-  document.getElementById('authSub').textContent = loginMode ? 'Sign in to your account' : 'Pick a username and password';
-  document.getElementById('authSubmitBtn').textContent = loginMode ? 'Sign in' : 'Create account';
-  document.getElementById('authSwitch').innerHTML = loginMode
-    ? `Don't have an account? <a id="authToggle">Create one</a>`
-    : `Already have an account? <a id="authToggle">Sign in instead</a>`;
-  document.getElementById('authError').style.display = 'none';
-  document.getElementById('authToggle').addEventListener('click', () => setAuthMode(!isLoginMode));
-}
-document.getElementById('authToggle').addEventListener('click', () => setAuthMode(false));
-document.getElementById('authSubmitBtn').addEventListener('click', async () => {
-  const uname = document.getElementById('authUsername').value.trim();
-  const pass = document.getElementById('authPassword').value;
-  const errEl = document.getElementById('authError');
-  const btn = document.getElementById('authSubmitBtn');
-  errEl.style.display = 'none';
-  if (!uname || !pass) { errEl.textContent = 'Please fill in all fields'; errEl.style.display = 'block'; return; }
-  btn.disabled = true; btn.textContent = isLoginMode ? 'Signing in…' : 'Creating account…';
-  try {
-    const data = await api('POST', isLoginMode ? '/login' : '/register', { username: uname, password: pass });
-    token = data.token; username = data.username; goal = data.goal || 2000;
-    localStorage.setItem('cal_token', token); localStorage.setItem('cal_username', username); localStorage.setItem('cal_goal', String(goal));
-    showApp();
-  } catch (err) { errEl.textContent = err.message; errEl.style.display = 'block'; }
-  finally { btn.disabled = false; btn.textContent = isLoginMode ? 'Sign in' : 'Create account'; }
-});
-['authUsername','authPassword'].forEach(id => {
-  document.getElementById(id).addEventListener('keydown', e => { if (e.key === 'Enter') document.getElementById('authSubmitBtn').click(); });
-});
-document.getElementById('logoutBtn').addEventListener('click', () => {
-  token = null; username = null;
-  localStorage.removeItem('cal_token'); localStorage.removeItem('cal_username');
-  showAuth();
-});
-
-// ── Autocomplete ───────────────────────────────────────────────────────────
+// ── Autocomplete (personal food history) ──────────────────────────────────
 const acDropdown = document.getElementById('acDropdown');
 const mealNameInput = document.getElementById('mealName');
-function closeDropdown() { acDropdown.classList.remove('open'); acDropdown.innerHTML = ''; acResults = []; acFocusIndex = -1; }
-function renderDropdown(results, searching) {
-  if (searching) { acDropdown.innerHTML = '<div class="ac-searching">Searching…</div>'; acDropdown.classList.add('open'); return; }
+const mealCalInput = document.getElementById('mealCal');
+const portionQtyInput = document.getElementById('portionQty');
+
+function closeDropdown() {
+  acDropdown.classList.remove('open');
+  acDropdown.innerHTML = '';
+  acResults = [];
+  acFocusIndex = -1;
+}
+
+function renderDropdown(results) {
   if (!results.length) { closeDropdown(); return; }
-  acResults = results; acFocusIndex = -1;
-  acDropdown.innerHTML = results.map((r, i) => {
-    const calInfo = r.kcalPer100g ? `${r.kcalPer100g} kcal/100g` : '';
-    const tag = (r.dataType === 'Foundation' || r.dataType === 'SR Legacy') ? `<span style="color:var(--green);font-size:10px;text-transform:uppercase;letter-spacing:0.04em;">USDA whole food</span>` : '';
-    return `<div class="ac-item" data-index="${i}"><div class="ac-name">${escHtml(r.name)}</div><div class="ac-meta">${calInfo ? `<span>${escHtml(calInfo)}</span>` : ''}${tag}</div></div>`;
-  }).join('');
+  acResults = results;
+  acFocusIndex = -1;
+  acDropdown.innerHTML = results.map((r, i) =>
+    `<div class="ac-item" data-index="${i}">
+      <span class="ac-name">${escHtml(r.name)}</span>
+      <span class="ac-meta-inline">${r.calories} kcal/unit</span>
+    </div>`
+  ).join('');
   acDropdown.classList.add('open');
   acDropdown.querySelectorAll('.ac-item').forEach(el => {
-    el.addEventListener('mousedown', e => { e.preventDefault(); selectResult(parseInt(el.dataset.index)); });
+    el.addEventListener('mousedown', e => {
+      e.preventDefault();
+      const r = acResults[parseInt(el.dataset.index)];
+      if (!r) return;
+      mealNameInput.value = r.name;
+      mealCalInput.value = r.calories;
+      portionQtyInput.value = 1;
+      updateTotal();
+      closeDropdown();
+      portionQtyInput.focus();
+      portionQtyInput.select();
+    });
   });
 }
-async function selectResult(i) {
-  const r = acResults[i]; if (!r) return;
-  mealNameInput.value = r.name;
-  closeDropdown();
-  // Show picker immediately with fallback portions while detail loads
-  selectedFood = r;
-  showPortionPicker(r);
-  // Fetch full detail for real measures (e.g. "1 large egg")
-  if (r.fdcId) {
-    try {
-      const detail = await api('GET', '/food-detail/' + r.fdcId);
-      if (detail && detail.portions && detail.portions.length > 0) {
-        selectedFood.portions = detail.portions;
-        selectedFood.kcalPer100g = detail.kcalPer100g;
-        // Refresh dropdown with real named portions (e.g. "1 large egg")
-        const sel = document.getElementById('portionUnit');
-        sel.innerHTML = detail.portions.map((p, idx) =>
-          `<option value="${idx}">${p.label} — ${p.kcal} kcal</option>`
-        ).join('');
-        sel.selectedIndex = 0; // default to first named portion
-        updatePortionCalc();
-      }
-    } catch(e) { /* keep fallback portions */ }
-  }
+
+function updateTotal() {
+  const cal = parseFloat(mealCalInput.value) || 0;
+  const qty = parseFloat(portionQtyInput.value) || 1;
+  const total = Math.round(cal * qty);
+  document.getElementById('qtyTotal').textContent = total > 0 ? total + ' kcal' : '—';
 }
 
-function showPortionPicker(food) {
-  const unitSel = document.getElementById('portionUnit');
-  const qtyInput = document.getElementById('portionQty');
-  const portions = food.portions && food.portions.length > 0 ? food.portions : [
-    { label: '100g', grams: 100, kcal: food.kcalPer100g || 0 },
-    { label: '1 oz (28g)', grams: 28, kcal: Math.round((food.kcalPer100g || 0) * 28 / 100) }
-  ];
-  food.portions = portions;
-  unitSel.innerHTML = portions.map((p, i) =>
-    `<option value="${i}">${p.label} — ${p.kcal} kcal</option>`
-  ).join('');
-  // Default to first option (named portion like "1 large egg"), qty 1
-  unitSel.selectedIndex = 0;
-  qtyInput.value = 1;
-  updatePortionCalc();
-  qtyInput.focus(); qtyInput.select();
-}
-
-function updatePortionCalc() {
-  if (!selectedFood) return;
-  const qty = parseFloat(document.getElementById('portionQty').value) || 1;
-  const idx = parseInt(document.getElementById('portionUnit').value) || 0;
-  const portion = selectedFood.portions[idx];
-  if (!portion) return;
-  // qty × kcal per 1 unit (e.g. 2 × 72 kcal/egg = 144 kcal)
-  const totalKcal = Math.round(portion.kcal * qty);
-  document.getElementById('mealCal').value = totalKcal;
-}
-
-function clearPortionPicker() {
-  selectedFood = null;
-  document.getElementById('portionUnit').innerHTML = '<option value="manual">— select unit —</option>';
-  document.getElementById('portionQty').value = 1;
-  document.getElementById('mealCal').value = '';
-}
-document.getElementById('portionQty').addEventListener('input', updatePortionCalc);
-document.getElementById('portionUnit').addEventListener('change', updatePortionCalc);
-
-document.getElementById('portionQty').addEventListener('keydown', e => {
-  if (e.key === 'Enter') document.getElementById('addMealBtn').click();
-});
-document.getElementById('mealCal').addEventListener('keydown', e => {
-  if (e.key === 'Enter') document.getElementById('addMealBtn').click();
-});
+mealCalInput.addEventListener('input', updateTotal);
+portionQtyInput.addEventListener('input', updateTotal);
 
 mealNameInput.addEventListener('input', () => {
-  const q = mealNameInput.value.trim(); clearTimeout(acDebounceTimer);
-  if (q.length < 3) { closeDropdown(); return; }
-  renderDropdown([], true);
+  const q = mealNameInput.value.trim();
+  clearTimeout(acDebounceTimer);
+  if (q.length < 1) { closeDropdown(); return; }
   acDebounceTimer = setTimeout(async () => {
-    try { const r = await api('GET', '/food-search?q=' + encodeURIComponent(q)); if (mealNameInput.value.trim() === q) renderDropdown(r, false); }
-    catch { closeDropdown(); }
-  }, 400);
+    try {
+      const results = await api('GET', '/food-history?q=' + encodeURIComponent(q));
+      if (mealNameInput.value.trim() === q) renderDropdown(results);
+    } catch { closeDropdown(); }
+  }, 200);
 });
+
 mealNameInput.addEventListener('keydown', e => {
-  if (!acDropdown.classList.contains('open')) { if (e.key === 'Enter') document.getElementById('mealCal').focus(); return; }
+  if (!acDropdown.classList.contains('open')) {
+    if (e.key === 'Enter') mealCalInput.focus();
+    return;
+  }
   const items = acDropdown.querySelectorAll('.ac-item');
-  if (e.key === 'ArrowDown') { e.preventDefault(); acFocusIndex = Math.min(acFocusIndex + 1, items.length - 1); items.forEach((el, i) => el.classList.toggle('focused', i === acFocusIndex)); }
-  else if (e.key === 'ArrowUp') { e.preventDefault(); acFocusIndex = Math.max(acFocusIndex - 1, -1); items.forEach((el, i) => el.classList.toggle('focused', i === acFocusIndex)); }
-  else if (e.key === 'Enter') { e.preventDefault(); if (acFocusIndex >= 0) selectResult(acFocusIndex); else closeDropdown(); }
-  else if (e.key === 'Escape') closeDropdown();
+  if (e.key === 'ArrowDown') {
+    e.preventDefault();
+    acFocusIndex = Math.min(acFocusIndex + 1, items.length - 1);
+    items.forEach((el, i) => el.classList.toggle('focused', i === acFocusIndex));
+  } else if (e.key === 'ArrowUp') {
+    e.preventDefault();
+    acFocusIndex = Math.max(acFocusIndex - 1, -1);
+    items.forEach((el, i) => el.classList.toggle('focused', i === acFocusIndex));
+  } else if (e.key === 'Enter') {
+    e.preventDefault();
+    if (acFocusIndex >= 0) acDropdown.querySelectorAll('.ac-item')[acFocusIndex]?.dispatchEvent(new MouseEvent('mousedown'));
+    else closeDropdown();
+  } else if (e.key === 'Escape') {
+    closeDropdown();
+  }
 });
-document.addEventListener('click', e => { if (!e.target.closest('.meal-input-wrap')) closeDropdown(); });
-document.getElementById('mealCal').addEventListener('keydown', e => { if (e.key === 'Enter') document.getElementById('addMealBtn').click(); });
+
+mealCalInput.addEventListener('keydown', e => {
+  if (e.key === 'Enter') portionQtyInput.focus();
+});
+portionQtyInput.addEventListener('keydown', e => {
+  if (e.key === 'Enter') document.getElementById('addMealBtn').click();
+});
+
+document.addEventListener('click', e => {
+  if (!e.target.closest('.meal-input-wrap')) closeDropdown();
+});
 
 // ── Data loading ───────────────────────────────────────────────────────────
 async function loadAll() {
@@ -736,14 +651,20 @@ async function logMetric(payload) {
 
 document.getElementById('addMealBtn').addEventListener('click', async () => {
   const name = mealNameInput.value.trim();
-  const calories = parseInt(document.getElementById('mealCal').value);
-  if (!name || isNaN(calories) || calories < 0) return;
+  const calPerUnit = parseFloat(mealCalInput.value);
+  const qty = parseFloat(portionQtyInput.value) || 1;
+  const calories = Math.round(calPerUnit * qty);
+  if (!name || isNaN(calPerUnit) || calPerUnit < 0) return;
   const btn = document.getElementById('addMealBtn'); btn.disabled = true;
   try {
     const meal = await api('POST', '/days/' + dateKey(currentDate) + '/meals', { name, calories });
     currentDayData.meals.push(meal);
-    mealNameInput.value = ''; document.getElementById('mealCal').value = '';
-    closeDropdown(); clearPortionPicker(); mealNameInput.focus();
+    mealNameInput.value = '';
+    mealCalInput.value = '';
+    portionQtyInput.value = 1;
+    document.getElementById('qtyTotal').textContent = '—';
+    closeDropdown();
+    mealNameInput.focus();
     const ws = weekStart(currentDate);
     try { weekData = await api('GET', '/week/' + dateKey(ws)); } catch {}
     render();
