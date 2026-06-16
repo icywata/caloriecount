@@ -278,40 +278,43 @@ app.get('/api/food-search', authMiddleware, async (req, res) => {
   const USDA_KEY = process.env.USDA_API_KEY;
   if (!USDA_KEY) return res.status(500).json({ error: 'USDA API key not configured' });
   try {
-    const url = `https://api.nal.usda.gov/fdc/v1/foods/search?query=${encodeURIComponent(q)}&pageSize=15&api_key=${USDA_KEY}&dataType=Foundation,SR%20Legacy,Branded,Survey%20(FNDDS)`;
-    const response = await fetch(url);
-    const data = await response.json();
+    // Search Foundation + SR Legacy first (whole foods, most accurate)
+    // then fall back to Branded/Survey if needed
+    const searchFoundation = `https://api.nal.usda.gov/fdc/v1/foods/search?query=${encodeURIComponent(q)}&pageSize=10&api_key=${USDA_KEY}&dataType=Foundation,SR%20Legacy`;
+    const searchBranded = `https://api.nal.usda.gov/fdc/v1/foods/search?query=${encodeURIComponent(q)}&pageSize=8&api_key=${USDA_KEY}&dataType=Branded,Survey%20(FNDDS)`;
 
-    const foods = data.foods || [];
-    console.log(`USDA returned ${foods.length} foods for "${q}"`);
-    if (foods.length > 0) {
-      const sample = foods[0];
-      console.log('Sample nutrients:', JSON.stringify((sample.foodNutrients || []).slice(0, 5)));
+    const [r1, r2] = await Promise.all([fetch(searchFoundation), fetch(searchBranded)]);
+    const [d1, d2] = await Promise.all([r1.json(), r2.json()]);
+
+    // Combine: Foundation/SR Legacy first, then Branded
+    const foods = [...(d1.foods || []), ...(d2.foods || [])];
+
+    function extractKcal(nutrients) {
+      const e = (nutrients || []).find(n =>
+        n.nutrientId === 1008 || n.nutrientId === 2047 || n.nutrientId === 2048 ||
+        n.nutrientNumber === '208' ||
+        (n.nutrientName && n.nutrientName.toLowerCase() === 'energy')
+      );
+      return e ? (e.value ?? e.amount ?? 0) : 0;
     }
 
     const results = foods
       .map(f => {
-        const nutrients = f.foodNutrients || [];
-        // USDA search API uses different field names - try all variants
-        const energy = nutrients.find(n =>
-          n.nutrientId === 1008 ||
-          n.nutrientId === 2047 ||
-          n.nutrientId === 2048 ||
-          n.nutrientNumber === '208' ||
-          (n.nutrientName && n.nutrientName.toLowerCase() === 'energy')
-        );
-        const kcalPer100g = energy ? (energy.value ?? energy.amount ?? 0) : 0;
+        const kcalPer100g = extractKcal(f.foodNutrients);
+        if (!kcalPer100g) return null;
         const brand = f.brandOwner || f.brandName || null;
-        const name = f.description + (brand ? ` (${brand})` : '');
+        const dataLabel = f.dataType === 'Foundation' || f.dataType === 'SR Legacy' ? null : brand;
+        const name = f.description + (dataLabel ? ` (${dataLabel})` : '');
         return {
           fdcId: f.fdcId,
           name,
+          dataType: f.dataType,
           kcalPer100g: Math.round(kcalPer100g),
           portions: buildFallbackPortions(kcalPer100g, f.servingSize, f.servingSizeUnit)
         };
       })
-      .filter(f => f.name)
-      .slice(0, 10);
+      .filter(Boolean)
+      .slice(0, 12);
 
     res.json(results);
   } catch (err) {
@@ -324,7 +327,7 @@ function buildFallbackPortions(kcalPer100g, servingSize, servingSizeUnit) {
   const portions = [];
   if (servingSize && servingSizeUnit) {
     const unit = servingSizeUnit.toLowerCase();
-    if (unit === 'g' || unit === 'ml') {
+    if ((unit === 'g' || unit === 'ml') && servingSize > 0) {
       portions.push({
         label: `1 serving (${servingSize}${servingSizeUnit})`,
         grams: servingSize,
@@ -332,6 +335,7 @@ function buildFallbackPortions(kcalPer100g, servingSize, servingSizeUnit) {
       });
     }
   }
+  // These are fallbacks — pushed to the end
   portions.push({ label: '100g', grams: 100, kcal: Math.round(kcalPer100g) });
   portions.push({ label: '1 oz (28g)', grams: 28, kcal: Math.round((kcalPer100g * 28) / 100) });
   return portions;
@@ -354,11 +358,11 @@ app.get('/api/food-detail/:fdcId', authMiddleware, async (req, res) => {
 
     const portions = [];
 
-    // Add named measures (e.g. "1 large egg", "1 cup sliced")
+    // Named measures first — these are what people actually use (e.g. "1 large egg", "1 cup")
     if (f.foodPortions && f.foodPortions.length > 0) {
       f.foodPortions.forEach(p => {
         const label = p.modifier || p.measureUnit?.name || null;
-        if (label && p.gramWeight) {
+        if (label && p.gramWeight && label.toLowerCase() !== 'quantity not specified') {
           portions.push({
             label: `1 ${label}`,
             grams: p.gramWeight,
@@ -368,10 +372,10 @@ app.get('/api/food-detail/:fdcId', authMiddleware, async (req, res) => {
       });
     }
 
-    // Serving size
+    // Serving size from branded foods
     if (f.servingSize && f.servingSizeUnit) {
       const unit = f.servingSizeUnit.toLowerCase();
-      if (unit === 'g' || unit === 'ml') {
+      if ((unit === 'g' || unit === 'ml') && f.servingSize > 0) {
         portions.push({
           label: `1 serving (${f.servingSize}${f.servingSizeUnit})`,
           grams: f.servingSize,
@@ -380,7 +384,7 @@ app.get('/api/food-detail/:fdcId', authMiddleware, async (req, res) => {
       }
     }
 
-    // Always include 100g and 1oz
+    // 100g and oz go at the END as fallbacks only
     portions.push({ label: '100g', grams: 100, kcal: Math.round(kcalPer100g) });
     portions.push({ label: '1 oz (28g)', grams: 28, kcal: Math.round((kcalPer100g * 28) / 100) });
 

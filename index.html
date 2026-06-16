@@ -223,7 +223,7 @@
       <!-- Row 2: qty + unit + calories + add (shown always, unit dropdown populated after search selection) -->
       <div class="qty-row">
         <input type="number" id="portionQty" placeholder="Qty" value="1" min="0.1" step="0.1" />
-        <select id="portionUnit"><option value="manual">— select unit —</option></select>
+        <select id="portionUnit"><option value="manual">— pick a food first —</option></select>
         <input type="number" id="mealCal" placeholder="Calories" min="0" autocomplete="off" />
         <button class="btn-add" id="addMealBtn">+ Add</button>
       </div>
@@ -407,7 +407,8 @@ function renderDropdown(results, searching) {
   acResults = results; acFocusIndex = -1;
   acDropdown.innerHTML = results.map((r, i) => {
     const calInfo = r.kcalPer100g ? `${r.kcalPer100g} kcal/100g` : '';
-    return `<div class="ac-item" data-index="${i}"><div class="ac-name">${escHtml(r.name)}</div>${calInfo ? `<div class="ac-meta"><span>${escHtml(calInfo)}</span></div>` : ''}</div>`;
+    const tag = (r.dataType === 'Foundation' || r.dataType === 'SR Legacy') ? `<span style="color:var(--green);font-size:10px;text-transform:uppercase;letter-spacing:0.04em;">USDA whole food</span>` : '';
+    return `<div class="ac-item" data-index="${i}"><div class="ac-name">${escHtml(r.name)}</div><div class="ac-meta">${calInfo ? `<span>${escHtml(calInfo)}</span>` : ''}${tag}</div></div>`;
   }).join('');
   acDropdown.classList.add('open');
   acDropdown.querySelectorAll('.ac-item').forEach(el => {
@@ -428,10 +429,12 @@ async function selectResult(i) {
       if (detail && detail.portions && detail.portions.length > 0) {
         selectedFood.portions = detail.portions;
         selectedFood.kcalPer100g = detail.kcalPer100g;
-        // Refresh the unit dropdown with real portions
-        document.getElementById('portionUnit').innerHTML = detail.portions.map((p, idx) =>
+        // Refresh dropdown with real named portions (e.g. "1 large egg")
+        const sel = document.getElementById('portionUnit');
+        sel.innerHTML = detail.portions.map((p, idx) =>
           `<option value="${idx}">${p.label} — ${p.kcal} kcal</option>`
         ).join('');
+        sel.selectedIndex = 0; // default to first named portion
         updatePortionCalc();
       }
     } catch(e) { /* keep fallback portions */ }
@@ -449,6 +452,8 @@ function showPortionPicker(food) {
   unitSel.innerHTML = portions.map((p, i) =>
     `<option value="${i}">${p.label} — ${p.kcal} kcal</option>`
   ).join('');
+  // Default to first option (named portion like "1 large egg"), qty 1
+  unitSel.selectedIndex = 0;
   qtyInput.value = 1;
   updatePortionCalc();
   qtyInput.focus(); qtyInput.select();
@@ -460,8 +465,8 @@ function updatePortionCalc() {
   const idx = parseInt(document.getElementById('portionUnit').value) || 0;
   const portion = selectedFood.portions[idx];
   if (!portion) return;
+  // qty × kcal per 1 unit (e.g. 2 × 72 kcal/egg = 144 kcal)
   const totalKcal = Math.round(portion.kcal * qty);
-  document.getElementById('portionKcal').textContent = totalKcal + ' kcal';
   document.getElementById('mealCal').value = totalKcal;
 }
 
