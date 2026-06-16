@@ -291,19 +291,50 @@ app.get('/api/food-search', authMiddleware, async (req, res) => {
       .map(f => {
         const nutrients = f.foodNutrients || [];
         const energy = nutrients.find(n => n.nutrientId === 1008 || n.nutrientName === 'Energy');
-        const kcalPer100g = Math.round(energy.value);
+        const kcalPer100g = energy.value; // keep as float for accurate portion calc
         const brand = f.brandOwner || f.brandName || null;
         const name = f.description + (brand ? ` (${brand})` : '');
-        // Estimate per-serving if serving size available
-        let caloriesPerServing = null;
-        let servingSize = null;
+
+        // Build portion options from food measures
+        const portions = [];
+
+        // Add serving size if available
         if (f.servingSize && f.servingSizeUnit) {
-          servingSize = `${f.servingSize}${f.servingSizeUnit}`;
-          if (f.servingSizeUnit.toLowerCase() === 'g') {
-            caloriesPerServing = Math.round((kcalPer100g * f.servingSize) / 100);
+          const unit = f.servingSizeUnit.toLowerCase();
+          if (unit === 'g' || unit === 'ml') {
+            portions.push({
+              label: `1 serving (${f.servingSize}${f.servingSizeUnit})`,
+              grams: f.servingSize,
+              kcal: Math.round((kcalPer100g * f.servingSize) / 100)
+            });
           }
         }
-        return { name, caloriesPer100g: kcalPer100g, caloriesPerServing, servingSize };
+
+        // Add food measures (e.g. "1 large egg", "1 cup")
+        if (f.foodMeasures && f.foodMeasures.length > 0) {
+          f.foodMeasures.forEach(m => {
+            if (m.gramWeight && m.disseminationText) {
+              portions.push({
+                label: m.disseminationText,
+                grams: m.gramWeight,
+                kcal: Math.round((kcalPer100g * m.gramWeight) / 100)
+              });
+            }
+          });
+        }
+
+        // Always include 100g and 1oz as fallbacks
+        portions.push({ label: '100g', grams: 100, kcal: Math.round(kcalPer100g) });
+        portions.push({ label: '1 oz (28g)', grams: 28, kcal: Math.round((kcalPer100g * 28) / 100) });
+
+        // Dedupe by label
+        const seen = new Set();
+        const uniquePortions = portions.filter(p => {
+          if (seen.has(p.label)) return false;
+          seen.add(p.label); return true;
+        });
+
+        return { name, kcalPer100g: Math.round(kcalPer100g), portions: uniquePortions };
       })
       .slice(0, 10);
 
