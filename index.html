@@ -315,6 +315,35 @@
 <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.js"></script>
 <script>
 // ── State ──────────────────────────────────────────────────────────────────
+// ── API & helpers ─────────────────────────────────────────────────────────
+async function api(method, path, body) {
+  const opts = { method, headers: { 'Content-Type': 'application/json' } };
+  if (token) opts.headers['Authorization'] = 'Bearer ' + token;
+  if (body) opts.body = JSON.stringify(body);
+  const res = await fetch('/api' + path, opts);
+  const data = await res.json();
+  if (!res.ok) throw new Error(data.error || 'Request failed');
+  return data;
+}
+function dateKey(d) { return d.toISOString().slice(0,10); }
+function escHtml(s) { return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
+function formatLabel(d) {
+  const today = new Date(); today.setHours(0,0,0,0);
+  const diff = Math.round((d - today) / 86400000);
+  const fmt = d.toLocaleDateString('en-US', { weekday:'short', month:'short', day:'numeric' });
+  if (diff === 0) return 'Today — ' + fmt;
+  if (diff === -1) return 'Yesterday — ' + fmt;
+  return fmt + (d.getFullYear() !== today.getFullYear() ? ', ' + d.getFullYear() : '');
+}
+function weekStart(d) {
+  const day = d.getDay(), diff = day === 0 ? -6 : 1 - day;
+  const s = new Date(d); s.setDate(d.getDate() + diff); s.setHours(0,0,0,0); return s;
+}
+function fmtDate(str) {
+  const s = str.slice(0, 10); const [,m,d] = s.split('-').map(Number);
+  return new Date(2000, m-1, d).toLocaleDateString('en-US', { month:'short', day:'numeric' });
+}
+
 let token = localStorage.getItem('cal_token') || null;
 let username = localStorage.getItem('cal_username') || null;
 let goal = parseInt(localStorage.getItem('cal_goal')) || 2000;
