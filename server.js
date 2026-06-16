@@ -282,35 +282,35 @@ app.get('/api/food-search', authMiddleware, async (req, res) => {
     const response = await fetch(url);
     const data = await response.json();
 
-    const results = (data.foods || [])
-      .filter(f => {
-        const nutrients = f.foodNutrients || [];
-        // Search API returns nutrientId as a number OR uses nutrientNumber string
-        const energy = nutrients.find(n =>
-          n.nutrientId === 1008 ||
-          n.nutrientNumber === '208' ||
-          (n.nutrientName && n.nutrientName.toLowerCase().includes('energy'))
-        );
-        return energy && (energy.value || energy.amount) > 0;
-      })
+    const foods = data.foods || [];
+    console.log(`USDA returned ${foods.length} foods for "${q}"`);
+    if (foods.length > 0) {
+      const sample = foods[0];
+      console.log('Sample nutrients:', JSON.stringify((sample.foodNutrients || []).slice(0, 5)));
+    }
+
+    const results = foods
       .map(f => {
         const nutrients = f.foodNutrients || [];
+        // USDA search API uses different field names - try all variants
         const energy = nutrients.find(n =>
           n.nutrientId === 1008 ||
+          n.nutrientId === 2047 ||
+          n.nutrientId === 2048 ||
           n.nutrientNumber === '208' ||
-          (n.nutrientName && n.nutrientName.toLowerCase().includes('energy'))
+          (n.nutrientName && n.nutrientName.toLowerCase() === 'energy')
         );
-        const kcalPer100g = energy.value || energy.amount;
+        const kcalPer100g = energy ? (energy.value ?? energy.amount ?? 0) : 0;
         const brand = f.brandOwner || f.brandName || null;
         const name = f.description + (brand ? ` (${brand})` : '');
         return {
           fdcId: f.fdcId,
           name,
           kcalPer100g: Math.round(kcalPer100g),
-          // Portions populated client-side after fetching food detail
           portions: buildFallbackPortions(kcalPer100g, f.servingSize, f.servingSizeUnit)
         };
       })
+      .filter(f => f.name)
       .slice(0, 10);
 
     res.json(results);
