@@ -270,26 +270,43 @@ app.delete('/api/meals/:id', authMiddleware, async (req, res) => {
   }
 });
 
-// ─── FOOD SEARCH ─────────────────────────────────────────────────────────────
+// ─── FOOD SEARCH (USDA FoodData Central) ────────────────────────────────────
 
 app.get('/api/food-search', authMiddleware, async (req, res) => {
   const { q } = req.query;
   if (!q || q.length < 2) return res.json([]);
+  const USDA_KEY = process.env.USDA_API_KEY;
+  if (!USDA_KEY) return res.status(500).json({ error: 'USDA API key not configured' });
   try {
-    const url = `https://world.openfoodfacts.org/cgi/search.pl?search_terms=${encodeURIComponent(q)}&search_simple=1&action=process&json=1&page_size=15&fields=product_name,nutriments,brands,serving_size`;
-    const response = await fetch(url, { headers: { 'User-Agent': 'CalorieTracker/1.0 (personal health app)' } });
+    const url = `https://api.nal.usda.gov/fdc/v1/foods/search?query=${encodeURIComponent(q)}&pageSize=20&api_key=${USDA_KEY}&dataType=Foundation,SR%20Legacy,Branded,Survey%20(FNDDS)`;
+    const response = await fetch(url);
     const data = await response.json();
-    const results = (data.products || [])
-      .filter(p => p.product_name && p.nutriments && p.nutriments['energy-kcal_100g'])
-      .map(p => {
-        const brand = p.brands ? p.brands.split(',')[0].trim() : null;
-        return {
-          name: p.product_name + (brand ? ` (${brand})` : ''),
-          caloriesPer100g: Math.round(p.nutriments['energy-kcal_100g']),
-          caloriesPerServing: p.nutriments['energy-kcal_serving'] ? Math.round(p.nutriments['energy-kcal_serving']) : null,
-          servingSize: p.serving_size || null
-        };
-      }).slice(0, 8);
+
+    const results = (data.foods || [])
+      .filter(f => {
+        const nutrients = f.foodNutrients || [];
+        const energy = nutrients.find(n => n.nutrientId === 1008 || n.nutrientName === 'Energy');
+        return energy && energy.value > 0;
+      })
+      .map(f => {
+        const nutrients = f.foodNutrients || [];
+        const energy = nutrients.find(n => n.nutrientId === 1008 || n.nutrientName === 'Energy');
+        const kcalPer100g = Math.round(energy.value);
+        const brand = f.brandOwner || f.brandName || null;
+        const name = f.description + (brand ? ` (${brand})` : '');
+        // Estimate per-serving if serving size available
+        let caloriesPerServing = null;
+        let servingSize = null;
+        if (f.servingSize && f.servingSizeUnit) {
+          servingSize = `${f.servingSize}${f.servingSizeUnit}`;
+          if (f.servingSizeUnit.toLowerCase() === 'g') {
+            caloriesPerServing = Math.round((kcalPer100g * f.servingSize) / 100);
+          }
+        }
+        return { name, caloriesPer100g: kcalPer100g, caloriesPerServing, servingSize };
+      })
+      .slice(0, 10);
+
     res.json(results);
   } catch (err) {
     console.error('Food search error:', err);
