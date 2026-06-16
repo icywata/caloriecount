@@ -278,63 +278,38 @@ app.get('/api/food-search', authMiddleware, async (req, res) => {
   const USDA_KEY = process.env.USDA_API_KEY;
   if (!USDA_KEY) return res.status(500).json({ error: 'USDA API key not configured' });
   try {
-    const url = `https://api.nal.usda.gov/fdc/v1/foods/search?query=${encodeURIComponent(q)}&pageSize=20&api_key=${USDA_KEY}&dataType=Foundation,SR%20Legacy,Branded,Survey%20(FNDDS)&fields=fdcId,description,brandOwner,brandName,servingSize,servingSizeUnit,foodNutrients,foodMeasures`;
+    const url = `https://api.nal.usda.gov/fdc/v1/foods/search?query=${encodeURIComponent(q)}&pageSize=15&api_key=${USDA_KEY}&dataType=Foundation,SR%20Legacy,Branded,Survey%20(FNDDS)`;
     const response = await fetch(url);
     const data = await response.json();
 
     const results = (data.foods || [])
       .filter(f => {
         const nutrients = f.foodNutrients || [];
-        const energy = nutrients.find(n => n.nutrientId === 1008 || n.nutrientName === 'Energy');
-        return energy && energy.value > 0;
+        // Search API returns nutrientId as a number OR uses nutrientNumber string
+        const energy = nutrients.find(n =>
+          n.nutrientId === 1008 ||
+          n.nutrientNumber === '208' ||
+          (n.nutrientName && n.nutrientName.toLowerCase().includes('energy'))
+        );
+        return energy && (energy.value || energy.amount) > 0;
       })
       .map(f => {
         const nutrients = f.foodNutrients || [];
-        const energy = nutrients.find(n => n.nutrientId === 1008 || n.nutrientName === 'Energy');
-        const kcalPer100g = energy.value; // keep as float for accurate portion calc
+        const energy = nutrients.find(n =>
+          n.nutrientId === 1008 ||
+          n.nutrientNumber === '208' ||
+          (n.nutrientName && n.nutrientName.toLowerCase().includes('energy'))
+        );
+        const kcalPer100g = energy.value || energy.amount;
         const brand = f.brandOwner || f.brandName || null;
         const name = f.description + (brand ? ` (${brand})` : '');
-
-        // Build portion options from food measures
-        const portions = [];
-
-        // Add serving size if available
-        if (f.servingSize && f.servingSizeUnit) {
-          const unit = f.servingSizeUnit.toLowerCase();
-          if (unit === 'g' || unit === 'ml') {
-            portions.push({
-              label: `1 serving (${f.servingSize}${f.servingSizeUnit})`,
-              grams: f.servingSize,
-              kcal: Math.round((kcalPer100g * f.servingSize) / 100)
-            });
-          }
-        }
-
-        // Add food measures (e.g. "1 large egg", "1 cup")
-        if (f.foodMeasures && f.foodMeasures.length > 0) {
-          f.foodMeasures.forEach(m => {
-            if (m.gramWeight && m.disseminationText) {
-              portions.push({
-                label: m.disseminationText,
-                grams: m.gramWeight,
-                kcal: Math.round((kcalPer100g * m.gramWeight) / 100)
-              });
-            }
-          });
-        }
-
-        // Always include 100g and 1oz as fallbacks
-        portions.push({ label: '100g', grams: 100, kcal: Math.round(kcalPer100g) });
-        portions.push({ label: '1 oz (28g)', grams: 28, kcal: Math.round((kcalPer100g * 28) / 100) });
-
-        // Dedupe by label
-        const seen = new Set();
-        const uniquePortions = portions.filter(p => {
-          if (seen.has(p.label)) return false;
-          seen.add(p.label); return true;
-        });
-
-        return { name, kcalPer100g: Math.round(kcalPer100g), portions: uniquePortions };
+        return {
+          fdcId: f.fdcId,
+          name,
+          kcalPer100g: Math.round(kcalPer100g),
+          // Portions populated client-side after fetching food detail
+          portions: buildFallbackPortions(kcalPer100g, f.servingSize, f.servingSizeUnit)
+        };
       })
       .slice(0, 10);
 
@@ -342,6 +317,84 @@ app.get('/api/food-search', authMiddleware, async (req, res) => {
   } catch (err) {
     console.error('Food search error:', err);
     res.json([]);
+  }
+});
+
+function buildFallbackPortions(kcalPer100g, servingSize, servingSizeUnit) {
+  const portions = [];
+  if (servingSize && servingSizeUnit) {
+    const unit = servingSizeUnit.toLowerCase();
+    if (unit === 'g' || unit === 'ml') {
+      portions.push({
+        label: `1 serving (${servingSize}${servingSizeUnit})`,
+        grams: servingSize,
+        kcal: Math.round((kcalPer100g * servingSize) / 100)
+      });
+    }
+  }
+  portions.push({ label: '100g', grams: 100, kcal: Math.round(kcalPer100g) });
+  portions.push({ label: '1 oz (28g)', grams: 28, kcal: Math.round((kcalPer100g * 28) / 100) });
+  return portions;
+}
+
+// Fetch full food detail including measures (called when user selects a result)
+app.get('/api/food-detail/:fdcId', authMiddleware, async (req, res) => {
+  const { fdcId } = req.params;
+  const USDA_KEY = process.env.USDA_API_KEY;
+  try {
+    const url = `https://api.nal.usda.gov/fdc/v1/food/${fdcId}?api_key=${USDA_KEY}`;
+    const response = await fetch(url);
+    const f = await response.json();
+
+    const nutrients = f.foodNutrients || [];
+    const energy = nutrients.find(n =>
+      n.nutrient && (n.nutrient.id === 1008 || n.nutrient.number === '208')
+    );
+    const kcalPer100g = energy ? (energy.amount || 0) : 0;
+
+    const portions = [];
+
+    // Add named measures (e.g. "1 large egg", "1 cup sliced")
+    if (f.foodPortions && f.foodPortions.length > 0) {
+      f.foodPortions.forEach(p => {
+        const label = p.modifier || p.measureUnit?.name || null;
+        if (label && p.gramWeight) {
+          portions.push({
+            label: `1 ${label}`,
+            grams: p.gramWeight,
+            kcal: Math.round((kcalPer100g * p.gramWeight) / 100)
+          });
+        }
+      });
+    }
+
+    // Serving size
+    if (f.servingSize && f.servingSizeUnit) {
+      const unit = f.servingSizeUnit.toLowerCase();
+      if (unit === 'g' || unit === 'ml') {
+        portions.push({
+          label: `1 serving (${f.servingSize}${f.servingSizeUnit})`,
+          grams: f.servingSize,
+          kcal: Math.round((kcalPer100g * f.servingSize) / 100)
+        });
+      }
+    }
+
+    // Always include 100g and 1oz
+    portions.push({ label: '100g', grams: 100, kcal: Math.round(kcalPer100g) });
+    portions.push({ label: '1 oz (28g)', grams: 28, kcal: Math.round((kcalPer100g * 28) / 100) });
+
+    // Dedupe
+    const seen = new Set();
+    const uniquePortions = portions.filter(p => {
+      if (seen.has(p.label)) return false;
+      seen.add(p.label); return true;
+    });
+
+    res.json({ fdcId, kcalPer100g: Math.round(kcalPer100g), portions: uniquePortions });
+  } catch (err) {
+    console.error('Food detail error:', err);
+    res.status(500).json({ error: 'Failed to fetch food detail' });
   }
 });
 

@@ -413,20 +413,37 @@ function renderDropdown(results, searching) {
   if (!results.length) { closeDropdown(); return; }
   acResults = results; acFocusIndex = -1;
   acDropdown.innerHTML = results.map((r, i) => {
-    const calInfo = r.caloriesPerServing ? `${r.caloriesPerServing} kcal/serving · ${r.caloriesPer100g} kcal/100g` : `${r.caloriesPer100g} kcal/100g`;
-    return `<div class="ac-item" data-index="${i}"><div class="ac-name">${escHtml(r.name)}</div><div class="ac-meta"><span>${escHtml(calInfo)}</span>${r.servingSize ? `<span>${escHtml(r.servingSize)}</span>` : ''}</div></div>`;
+    const calInfo = r.kcalPer100g ? `${r.kcalPer100g} kcal/100g` : '';
+    return `<div class="ac-item" data-index="${i}"><div class="ac-name">${escHtml(r.name)}</div>${calInfo ? `<div class="ac-meta"><span>${escHtml(calInfo)}</span></div>` : ''}</div>`;
   }).join('');
   acDropdown.classList.add('open');
   acDropdown.querySelectorAll('.ac-item').forEach(el => {
     el.addEventListener('mousedown', e => { e.preventDefault(); selectResult(parseInt(el.dataset.index)); });
   });
 }
-function selectResult(i) {
+async function selectResult(i) {
   const r = acResults[i]; if (!r) return;
-  selectedFood = r;
   mealNameInput.value = r.name;
   closeDropdown();
+  // Show picker immediately with fallback portions while detail loads
+  selectedFood = r;
   showPortionPicker(r);
+  // Fetch full detail for real measures (e.g. "1 large egg")
+  if (r.fdcId) {
+    try {
+      const detail = await api('GET', '/food-detail/' + r.fdcId);
+      if (detail && detail.portions && detail.portions.length > 0) {
+        selectedFood.portions = detail.portions;
+        selectedFood.kcalPer100g = detail.kcalPer100g;
+        // Refresh the unit dropdown with real portions
+        const unitSel = document.getElementById('portionUnit');
+        unitSel.innerHTML = detail.portions.map((p, idx) =>
+          `<option value="${idx}">${p.label} — ${p.kcal} kcal</option>`
+        ).join('');
+        updatePortionCalc();
+      }
+    } catch(e) { /* keep fallback portions */ }
+  }
 }
 
 function showPortionPicker(food) {
