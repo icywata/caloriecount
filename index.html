@@ -325,6 +325,58 @@ let charts = { weight: null, bp: null, hr: null, water: null };
 let isLoginMode = true;
 let acResults = [], acFocusIndex = -1, acDebounceTimer = null;
 
+// ── Auth ───────────────────────────────────────────────────────────────────
+function showAuth() {
+  document.getElementById('loadingScreen').style.display = 'none';
+  document.getElementById('appScreen').style.display = 'none';
+  document.getElementById('authScreen').style.display = 'flex';
+}
+function showApp() {
+  document.getElementById('loadingScreen').style.display = 'none';
+  document.getElementById('authScreen').style.display = 'none';
+  document.getElementById('appScreen').style.display = 'block';
+  document.getElementById('usernameDisplay').textContent = username;
+  document.getElementById('goalInput').value = goal;
+  loadAll();
+}
+function setAuthMode(loginMode) {
+  isLoginMode = loginMode;
+  document.getElementById('authTitle').textContent = loginMode ? 'Welcome back' : 'Create account';
+  document.getElementById('authSub').textContent = loginMode ? 'Sign in to your account' : 'Pick a username and password';
+  document.getElementById('authSubmitBtn').textContent = loginMode ? 'Sign in' : 'Create account';
+  document.getElementById('authSwitch').innerHTML = loginMode
+    ? `Don't have an account? <a id="authToggle">Create one</a>`
+    : `Already have an account? <a id="authToggle">Sign in instead</a>`;
+  document.getElementById('authError').style.display = 'none';
+  document.getElementById('authToggle').addEventListener('click', () => setAuthMode(!isLoginMode));
+}
+document.getElementById('authToggle').addEventListener('click', () => setAuthMode(false));
+document.getElementById('authSubmitBtn').addEventListener('click', async () => {
+  const uname = document.getElementById('authUsername').value.trim();
+  const pass = document.getElementById('authPassword').value;
+  const errEl = document.getElementById('authError');
+  const btn = document.getElementById('authSubmitBtn');
+  errEl.style.display = 'none';
+  if (!uname || !pass) { errEl.textContent = 'Please fill in all fields'; errEl.style.display = 'block'; return; }
+  btn.disabled = true; btn.textContent = isLoginMode ? 'Signing in…' : 'Creating account…';
+  try {
+    const data = await api('POST', isLoginMode ? '/login' : '/register', { username: uname, password: pass });
+    token = data.token; username = data.username; goal = data.goal || 2000;
+    localStorage.setItem('cal_token', token); localStorage.setItem('cal_username', username); localStorage.setItem('cal_goal', String(goal));
+    showApp();
+  } catch (err) { errEl.textContent = err.message; errEl.style.display = 'block'; }
+  finally { btn.disabled = false; btn.textContent = isLoginMode ? 'Sign in' : 'Create account'; }
+});
+['authUsername','authPassword'].forEach(id => {
+  document.getElementById(id).addEventListener('keydown', e => { if (e.key === 'Enter') document.getElementById('authSubmitBtn').click(); });
+});
+document.getElementById('logoutBtn').addEventListener('click', () => {
+  token = null; username = null;
+  localStorage.removeItem('cal_token'); localStorage.removeItem('cal_username');
+  showAuth();
+});
+
+
 // ── Autocomplete (personal food history) ──────────────────────────────────
 const acDropdown = document.getElementById('acDropdown');
 const mealNameInput = document.getElementById('mealName');
