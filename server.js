@@ -304,7 +304,12 @@ app.get('/api/food-search', authMiddleware, async (req, res) => {
         if (!kcalPer100g) return null;
         const brand = f.brandOwner || f.brandName || null;
         const dataLabel = f.dataType === 'Foundation' || f.dataType === 'SR Legacy' ? null : brand;
-        const name = f.description + (dataLabel ? ` (${dataLabel})` : '');
+        const rawName = f.description || '';
+        // Clean up USDA descriptions: remove trailing qualifiers like "egg wl", "NFS", "NS"
+        const cleanName = rawName
+          .replace(/,?\s*(egg wl|egg white|egg yolk|NFS|NS|whole|raw|fresh|frozen|canned)$/i, '')
+          .replace(/\s+/g, ' ').trim();
+        const name = cleanName + (dataLabel ? ` (${dataLabel})` : '');
         return {
           fdcId: f.fdcId,
           name,
@@ -361,10 +366,14 @@ app.get('/api/food-detail/:fdcId', authMiddleware, async (req, res) => {
     // Named measures first — these are what people actually use (e.g. "1 large egg", "1 cup")
     if (f.foodPortions && f.foodPortions.length > 0) {
       f.foodPortions.forEach(p => {
-        const label = p.modifier || p.measureUnit?.name || null;
-        if (label && p.gramWeight && label.toLowerCase() !== 'quantity not specified') {
+        // USDA uses different fields depending on food type
+        const modifier = p.modifier || p.portionDescription || p.measureUnit?.name || '';
+        const amount = p.amount || 1;
+        const skip = ['quantity not specified', 'not specified', ''];
+        if (modifier && !skip.includes(modifier.toLowerCase()) && p.gramWeight) {
+          const label = amount !== 1 ? `${amount} ${modifier}` : `1 ${modifier}`;
           portions.push({
-            label: `1 ${label}`,
+            label,
             grams: p.gramWeight,
             kcal: Math.round((kcalPer100g * p.gramWeight) / 100)
           });
